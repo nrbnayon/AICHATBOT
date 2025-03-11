@@ -26,7 +26,7 @@ router.post(
 router.post(
   '/logout-all',
   auth(USER_ROLES.USER, USER_ROLES.ADMIN),
-  UserLogController.logoutAllSessions
+  // UserLogController.logoutAllSessions
 );
 
 export const UserLogRoutes = router;

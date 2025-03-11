@@ -58,33 +58,33 @@ const logoutSession = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const logoutAllSessions = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.id;
+// const logoutAllSessions = catchAsync(async (req: Request, res: Response) => {
+//   const userId = req.user?.id;
 
-  const result = await UserLogService.updateLogoutTime(userId, res);
-  console.log('result6555', result);
+//   const result = await UserLogService.updateLogoutTime(userId, res);
+//   console.log('result6555', result);
 
-  if (result?.acknowledged) {
-    // Delete all user logs that are active (or based on your needs)
-    const deleteResult = await UserLog.deleteMany({ userId: userId });
-  } else {
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to Logging out all sessions, try again later',
-    });
-  }
+//   if (result?.acknowledged) {
+//     // Delete all user logs that are active (or based on your needs)
+//     const deleteResult = await UserLog.deleteMany({ userId: userId });
+//   } else {
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Failed to Logging out all sessions, try again later',
+//     });
+//   }
 
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: 'All sessions logged out successfully',
-    data: null,
-  });
-});
+//   sendResponse(res, {
+//     success: true,
+//     statusCode: StatusCodes.OK,
+//     message: 'All sessions logged out successfully',
+//     data: null,
+//   });
+// });
 
 export const UserLogController = {
   getUserLogs,
   getActiveSessions,
   logoutSession,
-  logoutAllSessions,
+  // logoutAllSessions,
 };

@@ -29,16 +29,6 @@ const createUser = catchAsync(
   }
 );
 
-const setPassword = catchAsync(async (req: Request, res: Response) => {
-  const result = await UserService.setUserNewPassword(req.body);
-
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: 'Password set successfully. Now your account is fully activated',
-    data: result,
-  });
-});
 
 const getUserProfile = catchAsync(async (req: Request, res: Response) => {
   const user = req.user;
@@ -126,7 +116,6 @@ const updateOnlineStatus = catchAsync(async (req: Request, res: Response) => {
 
 export const UserController = {
   createUser,
-  setPassword,
   getUserProfile,
   updateProfile,
   getAllUser,

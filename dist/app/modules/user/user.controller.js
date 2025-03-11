@@ -38,15 +38,6 @@ const createUser = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 
         }
     }
 }));
-const setPassword = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const result = yield user_service_1.UserService.setUserNewPassword(req.body);
-    (0, sendResponse_1.default)(res, {
-        success: true,
-        statusCode: http_status_codes_1.StatusCodes.OK,
-        message: 'Password set successfully. Now your account is fully activated',
-        data: result,
-    });
-}));
 const getUserProfile = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const user = req.user;
     const result = yield user_service_1.UserService.getUserProfileFromDB(user);
@@ -115,7 +106,6 @@ const updateOnlineStatus = (0, catchAsync_1.default)((req, res) => __awaiter(voi
 }));
 exports.UserController = {
     createUser,
-    setPassword,
     getUserProfile,
     updateProfile,
     getAllUser,
