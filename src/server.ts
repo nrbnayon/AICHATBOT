@@ -1,3 +1,4 @@
+// src\server.ts
 import colors from 'colors';
 import http from 'http';
 import mongoose from 'mongoose';
@@ -5,7 +6,6 @@ import { Server } from 'socket.io';
 import app from './app';
 import config from './config';
 import seedAdmin from './DB';
-import { socketHelper } from './helpers/socketHelper';
 import { errorLogger, logger } from './shared/logger';
 
 // Uncaught exception handler
@@ -21,7 +21,7 @@ async function main() {
   try {
     seedAdmin();
     mongoose.connect(config.database.mongodb_uri as string);
-    logger.info(colors.green('🚀  Database connected successfully'));
+    logger.info(colors.green('🚀 Database connected successfully'));
 
     const port =
       typeof config.port === 'number' ? config.port : Number(config.port);
@@ -34,10 +34,6 @@ async function main() {
         origin: '*',
       },
     });
-    app.set('io', io);
-    socketHelper.socket(io);
-    //@ts-ignore
-    global.io = io;
 
     server.listen(port, config.ip_address as string, () => {
       logger.info(

@@ -5,7 +5,6 @@ import globalErrorHandler from './app/middlewares/globalErrorHandler';
 import router from './routes';
 import { Morgan } from './shared/morgen';
 import responseInterceptor from './app/middlewares/responseInterceptor';
-// import { PaymentController } from './app/modules/payment/payment.controller';
 
 const app = express();
 
@@ -13,7 +12,6 @@ const app = express();
 app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
-// CORS
 app.use(
   cors({
     origin: [
@@ -25,6 +23,8 @@ app.use(
       'http://10.0.70.173:5173',
       'http://10.0.70.172:5173',
       'http://10.0.70.173:50262',
+      'https://your-frontend-domain.vercel.app', 
+      'https://your-app-name.vercel.app', 
     ],
     credentials: true,
   })
@@ -32,21 +32,11 @@ app.use(
 
 app.use(responseInterceptor);
 
-// Webhook route (before body parser)
-// app.post(
-//   '/webhook',
-//   express.raw({ type: 'application/json' }),
-//   PaymentController.stripeWebhookController
-// );
-
-// Body parser with increased limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static file serving
 app.use(express.static('uploads'));
 
-// Routes
 app.use('/api/v1', router);
 
 // Home route
@@ -72,5 +62,13 @@ app.use((req, res) => {
     ],
   });
 });
+
+// Don't run the server when in a serverless environment
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
 
 export default app;

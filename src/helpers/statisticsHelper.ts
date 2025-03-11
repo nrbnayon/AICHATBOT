@@ -80,9 +80,6 @@ const calculateStatistics = async <T>(
 export const statisticsHelper = {
   calculateStatistics,
 };
-
-
-// Example 1: Using in Banner Service
 // import { statisticsHelper } from '../helpers/statisticsHelper';
 
 // const getAllBanners = async (query: Record<string, unknown>) => {
