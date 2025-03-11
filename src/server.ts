@@ -22,23 +22,31 @@ process.on('SIGTERM', () => {
   logger.info('SIGTERM IS RECEIVED');
 });
 
-// Connect to database in non-serverless environments
-// or if we're not already connected
-if (process.env.NODE_ENV !== 'production' || !mongoose.connection.readyState) {
+// Connect to database (works in both serverless and development)
+let isConnected = false;
+
+const connectDB = async () => {
+  if (isConnected) {
+    logger.info('MongoDB is already connected');
+    return;
+  }
+
   try {
-    seedAdmin();
-    mongoose
-      .connect(config.database.mongodb_uri as string)
-      .then(() => {
-        logger.info(colors.green('🚀 Database connected successfully'));
-      })
-      .catch(error => {
-        errorLogger.error(colors.red('🤢 Failed to connect Database'), error);
-      });
+    await mongoose.connect(config.database.mongodb_uri as string);
+    isConnected = true;
+    logger.info(colors.green('🚀 Database connected successfully'));
+
+    // Only seed admin in development environment
+    if (process.env.NODE_ENV !== 'production') {
+      seedAdmin();
+    }
   } catch (error) {
     errorLogger.error(colors.red('🤢 Failed to connect Database'), error);
   }
-}
+};
+
+// Connect to database
+connectDB();
 
 // Start server only in development environment
 if (process.env.NODE_ENV !== 'production') {
