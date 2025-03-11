@@ -62,6 +62,7 @@ app.get('/', (req: Request, res: Response) => {
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
       ">
     <!-- Header -->
+    <h1 style="text-align:center; color:#A55FEF; font-family:Verdana;">Hey Frontend Developer, How can I assist you today!</h1>
     <div style="
           background-color: #4caf50;
           color: white;
