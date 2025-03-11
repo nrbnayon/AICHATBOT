@@ -11,12 +11,10 @@ import generateOTP from '../../../util/generateOTP';
 import colors from 'colors';
 import { IUser, SetPasswordPayload } from './user.interface';
 import { User } from './user.model';
-import { sendNotifications } from '../../../helpers/notificationHelper';
 import unlinkFile from '../../../shared/unlinkFile';
 import { logger } from '../../../shared/logger';
 import config from '../../../config';
 import { jwtHelper } from '../../../helpers/jwtHelper';
-import { INotification } from '../notification/notification.interface';
 
 const createUserIntoDB = async (payload: IUser) => {
   const existingUser = await User.findOne({ email: payload.email });
@@ -111,105 +109,105 @@ const createUserIntoDB = async (payload: IUser) => {
   }
 };
 
-const setUserNewPassword = async (payload: SetPasswordPayload) => {
-  const { email, password, address } = payload;
+// const setUserNewPassword = async (payload: SetPasswordPayload) => {
+//   const { email, password, address } = payload;
 
-  const user = await User.findOne({ email });
+//   const user = await User.findOne({ email });
 
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
+//   if (!user) {
+//     throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+//   }
 
-  if (!user.verified) {
-    throw new ApiError(
-      StatusCodes.BAD_REQUEST,
-      'Please verify your email first'
-    );
-  }
+//   if (!user.verified) {
+//     throw new ApiError(
+//       StatusCodes.BAD_REQUEST,
+//       'Please verify your email first'
+//     );
+//   }
 
-  const hashedPassword = await bcrypt.hash(
-    password,
-    Number(config.bcrypt_salt_rounds)
-  );
+//   const hashedPassword = await bcrypt.hash(
+//     password,
+//     Number(config.bcrypt_salt_rounds)
+//   );
 
-  const session = await mongoose.startSession();
-  let updatedUser;
+//   const session = await mongoose.startSession();
+//   let updatedUser;
 
-  try {
-    await session.withTransaction(async () => {
-      // Update user with password and set status to active
-      updatedUser = await User.findByIdAndUpdate(
-        user._id,
-        {
-          password: hashedPassword,
-          address,
-          status: 'active',
-        },
-        { new: true, session }
-      ).select('-password');
+//   try {
+//     await session.withTransaction(async () => {
+//       // Update user with password and set status to active
+//       updatedUser = await User.findByIdAndUpdate(
+//         user._id,
+//         {
+//           password: hashedPassword,
+//           address,
+//           status: 'active',
+//         },
+//         { new: true, session }
+//       ).select('-password');
 
-      if (!updatedUser) {
-        throw new ApiError(
-          StatusCodes.INTERNAL_SERVER_ERROR,
-          'Failed to update user'
-        );
-      }
+//       if (!updatedUser) {
+//         throw new ApiError(
+//           StatusCodes.INTERNAL_SERVER_ERROR,
+//           'Failed to update user'
+//         );
+//       }
 
-      // Send admin notifications since the user registration is now complete
-      const adminUsers = await User.find({ role: USER_ROLES.ADMIN }).select(
-        '_id'
-      );
+//       // Send admin notifications since the user registration is now complete
+//       const adminUsers = await User.find({ role: USER_ROLES.ADMIN }).select(
+//         '_id'
+//       );
 
-      // Create notifications for each admin
-      const notificationPromises = adminUsers.map(admin => {
-        const notificationData: Partial<INotification> = {
-          message: `New ${user.role.toLowerCase()}, Name: ${
-            user.name
-          }, Email: (${user.email}) has completed registration.`,
-          type: 'ADMIN',
-          receiver: admin._id,
-          metadata: {
-            userId: user._id,
-            userEmail: user.email,
-            userName: user.name,
-            userRole: user.role,
-            action: `new_${user.role.toLowerCase()}_registration_completed`,
-          },
-        };
-        return sendNotifications(notificationData); // send notification using socketIO or other notification system
-        // return NotificationService.createNotification(notificationData);
-      });
+//       // Create notifications for each admin
+//       const notificationPromises = adminUsers.map(admin => {
+//         const notificationData: Partial<INotification> = {
+//           message: `New ${user.role.toLowerCase()}, Name: ${
+//             user.name
+//           }, Email: (${user.email}) has completed registration.`,
+//           type: 'ADMIN',
+//           receiver: admin._id,
+//           metadata: {
+//             userId: user._id,
+//             userEmail: user.email,
+//             userName: user.name,
+//             userRole: user.role,
+//             action: `new_${user.role.toLowerCase()}_registration_completed`,
+//           },
+//         };
+//         return sendNotifications(notificationData); // send notification using socketIO or other notification system
+//         // return NotificationService.createNotification(notificationData);
+//       });
 
-      await Promise.all(notificationPromises);
-    });
+//       await Promise.all(notificationPromises);
+//     });
 
-    await session.endSession();
+//     await session.endSession();
 
-    // Generate access token after successful password set
-    const accessToken = jwtHelper.createToken(
-      {
-        id: user._id,
-        role: user.role,
-        email: user.email,
-        name: user.name,
-      },
-      config.jwt.jwt_secret as Secret,
-      config.jwt.jwt_expire_in as string
-    );
+//     // Generate access token after successful password set
+//     const accessToken = jwtHelper.createToken(
+//       {
+//         id: user._id,
+//         role: user.role,
+//         email: user.email,
+//         name: user.name,
+//       },
+//       config.jwt.jwt_secret as Secret,
+//       config.jwt.jwt_expire_in as string
+//     );
 
-    return {
-      accessToken,
-      data: updatedUser,
-    };
-  } catch (error) {
-    await session.endSession();
-    logger.error('Set password error:', error);
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      'Failed to set password. Please try again later.'
-    );
-  }
-};
+//     return {
+//       accessToken,
+//       data: updatedUser,
+//     };
+//   } catch (error) {
+//     await session.endSession();
+//     logger.error('Set password error:', error);
+//     throw new ApiError(
+//       StatusCodes.INTERNAL_SERVER_ERROR,
+//       'Failed to set password. Please try again later.'
+//     );
+//   }
+// };
 
 const getAllUsers = async (query: Record<string, unknown>) => {
   const {
@@ -487,7 +485,7 @@ const updateUserOnlineStatus = async (userId: string, isOnline: boolean) => {
 
 export const UserService = {
   createUserIntoDB,
-  setUserNewPassword,
+  // setUserNewPassword,
   getUserProfileFromDB,
   updateProfileToDB,
   getAllUsers,

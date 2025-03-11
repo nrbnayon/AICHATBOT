@@ -2,7 +2,6 @@
 import colors from 'colors';
 import http from 'http';
 import mongoose from 'mongoose';
-import { Server } from 'socket.io';
 import app from './app';
 import config from './config';
 import seedAdmin from './DB';
@@ -10,12 +9,9 @@ import { errorLogger, logger } from './shared/logger';
 
 // Uncaught exception handler
 process.on('uncaughtException', error => {
-  errorLogger.error('UnhandleException Detected', error);
+  errorLogger.error('Unhandle Exception Detected::', error);
   process.exit(1);
 });
-
-let server: http.Server;
-let io: Server;
 
 async function main() {
   try {
@@ -26,14 +22,7 @@ async function main() {
     const port =
       typeof config.port === 'number' ? config.port : Number(config.port);
 
-    server = http.createServer(app);
-
-    io = new Server(server, {
-      pingTimeout: 60000,
-      cors: {
-        origin: '*',
-      },
-    });
+    const server = http.createServer(app);
 
     server.listen(port, config.ip_address as string, () => {
       logger.info(
@@ -45,7 +34,7 @@ async function main() {
     process.on('unhandledRejection', error => {
       if (server) {
         server.close(() => {
-          errorLogger.error('UnhandleRejection Detected', error);
+          errorLogger.error('Unhandled Rejection Detected::', error);
           process.exit(1);
         });
       } else {
@@ -60,9 +49,6 @@ async function main() {
 // SIGTERM handler
 process.on('SIGTERM', () => {
   logger.info('SIGTERM IS RECEIVED');
-  if (server) {
-    server.close();
-  }
 });
 
 main();
