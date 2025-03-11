@@ -7,25 +7,25 @@ const router = express.Router();
 
 router.get(
   '/logs',
-  auth(USER_ROLES.USER, USER_ROLES.ADMIN, USER_ROLES.HOST),
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
   UserLogController.getUserLogs
 );
 
 router.get(
   '/active-sessions',
-  auth(USER_ROLES.USER, USER_ROLES.ADMIN, USER_ROLES.HOST),
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
   UserLogController.getActiveSessions
 );
 
 router.post(
   '/logout/:sessionId',
-  auth(USER_ROLES.USER, USER_ROLES.ADMIN, USER_ROLES.HOST),
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
   UserLogController.logoutSession
 );
 
 router.post(
   '/logout-all',
-  auth(USER_ROLES.USER, USER_ROLES.ADMIN, USER_ROLES.HOST),
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
   UserLogController.logoutAllSessions
 );
 
