@@ -36,6 +36,7 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
+    "@vercel/node": "^3.0.0",
     "@types/express-rate-limit": "^6.0.2",
     "apple-auth": "^1.0.9",
     "axios": "^1.8.2",
