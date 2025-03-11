@@ -101,7 +101,7 @@ app.get('/', (req: Request, res: Response) => {
             ">
           Developer Details
         </h3>
-        <p><strong>Full Stack Developer:</strong> Nayon</p>
+        <p><strong>Software Engineer:</strong> Nayon</p>
         <p><strong>Location:</strong> Dhaka, Bangladesh</p>
       </div>
 
