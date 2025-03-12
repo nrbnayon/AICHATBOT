@@ -8,6 +8,7 @@ import {
   apiLimiter,
   authLimiter,
 } from '../../middlewares/rateLimit.middleware';
+import { USER_ROLES } from '../../../enums/common';
 
 const router = express.Router();
 
@@ -34,11 +35,16 @@ router.post(
 );
 
 // User management routes
-router.get('/me', auth(), apiLimiter, UserController.getCurrentUser);
+router.get(
+  '/me',
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
+  apiLimiter,
+  UserController.getCurrentUser
+);
 
 router.patch(
   '/profile',
-  auth(),
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
   apiLimiter,
   validateRequest(UserValidation.updateProfileSchema),
   UserController.updateProfile
@@ -49,7 +55,7 @@ router.post('/logout', auth(), apiLimiter, UserController.logout);
 // Subscription management
 router.patch(
   '/subscription',
-  auth(),
+  auth(USER_ROLES.USER),
   apiLimiter,
   validateRequest(UserValidation.updateSubscriptionSchema),
   UserController.updateSubscription
