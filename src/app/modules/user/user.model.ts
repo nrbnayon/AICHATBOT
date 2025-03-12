@@ -1,27 +1,48 @@
 // src\app\modules\user\user.model.ts
-import bcrypt from 'bcrypt';
-import { StatusCodes } from 'http-status-codes';
 import { model, Schema } from 'mongoose';
-import config from '../../../config';
-import { USER_ROLES } from '../../../enums/common';
-import ApiError from '../../../errors/ApiError';
+import {
+  AUTH_PROVIDER,
+  USER_GENDER,
+  USER_ROLES,
+  USER_STATUS,
+} from '../../../enums/common';
 import { IUser, UserModal } from './user.interface';
 
-const locationSchema = new Schema({
-  locationName: { type: String },
-  latitude: { type: Number },
-  longitude: { type: Number },
+const userSubscriptionSchema = new Schema({
+  plan: {
+    type: String,
+    enum: ['FREE', 'BASIC', 'PRO', 'ENTERPRISE'],
+    default: 'FREE',
+  },
+  startDate: {
+    type: Date,
+    default: Date.now,
+  },
+  endDate: {
+    type: Date,
+    default: () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
+  },
+  status: {
+    type: String,
+    enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
+    default: 'ACTIVE',
+  },
+  autoRenew: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 const userSchema = new Schema<IUser, UserModal>(
   {
-    name: {
-      type: String,
-      required: true,
-    },
     role: {
       type: String,
       enum: Object.values(USER_ROLES),
+      default: USER_ROLES.USER,
+      required: true,
+    },
+    name: {
+      type: String,
       required: true,
     },
     email: {
@@ -30,67 +51,92 @@ const userSchema = new Schema<IUser, UserModal>(
       unique: true,
       lowercase: true,
     },
+    authProvider: {
+      type: String,
+      enum: Object.values(AUTH_PROVIDER),
+      required: true,
+    },
+    image: String,
+    phone: String,
     password: {
       type: String,
       select: 0,
-      minlength: 8,
     },
-    phone: {
+    address: String,
+
+    // OAuth fields
+    googleId: {
       type: String,
+      sparse: true,
     },
-    postCode: {
+    microsoftId: {
       type: String,
+      sparse: true,
     },
-    address: { type: locationSchema },
-    country: {
+    yahooId: {
       type: String,
-      default: '',
+      sparse: true,
     },
+    googleAccessToken: {
+      type: String,
+      select: 0,
+    },
+    microsoftAccessToken: {
+      type: String,
+      select: 0,
+    },
+    yahooAccessToken: {
+      type: String,
+      select: 0,
+    },
+    refreshToken: {
+      type: String,
+      select: 0,
+    },
+
+    country: String,
     status: {
       type: String,
-      enum: [
-        'active',
-        'deactivate',
-        'delete',
-        'block',
-        'pending',
-        'inactive',
-        'approved',
-      ],
-      default: 'active',
-    },
-    gender: {
-      type: String,
-      enum: ['male', 'female', 'both'],
-    },
-    dateOfBirth: {
-      type: Date,
+      enum: Object.values(USER_STATUS),
+      default: USER_STATUS.ACTIVE,
     },
     verified: {
       type: Boolean,
       default: false,
     },
-    image: {
+    gender: {
       type: String,
-      default:
-        'https://www.shutterstock.com/shutterstock/photos/1153673752/display_1500/stock-vector-profile-placeholder-image-gray-silhouette-no-photo-1153673752.jpg',
+      enum: Object.values(USER_GENDER),
     },
-    appId: {
-      type: String,
-    },
-    fcmToken: {
-      type: String,
-    },
-    onlineStatus: {
+    dateOfBirth: Date,
+    isActive: {
       type: Boolean,
-      default: false,
+      default: true,
     },
-    lastActiveAt: {
+    lastActiveAt: Date,
+    lastSync: {
       type: Date,
-      default: null,
+      default: Date.now,
+    },
+    subscription: {
+      type: userSubscriptionSchema,
+      default: () => ({}),
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      virtuals: true,
+      transform: function (doc, ret) {
+        delete ret.password;
+        delete ret.googleAccessToken;
+        delete ret.microsoftAccessToken;
+        delete ret.yahooAccessToken;
+        delete ret.refreshToken;
+        return ret;
+      },
+    },
+  }
 );
 
 // Static methods
@@ -103,58 +149,26 @@ userSchema.statics.isExistUserById = async function (
 userSchema.statics.isExistUserByEmail = async function (
   email: string
 ): Promise<IUser | null> {
-  return await this.findOne({ email });
+  return await this.findOne({ email: email.toLowerCase() });
 };
 
-userSchema.statics.isAccountCreated = async function (
-  id: string
-): Promise<boolean> {
-  const isUserExist = await this.findById(id);
-  return !!isUserExist;
-};
-
-userSchema.statics.isMatchPassword = async function (
-  password: string,
-  hashPassword: string
-): Promise<boolean> {
-  return await bcrypt.compare(password, hashPassword);
-};
-
-userSchema.statics.findByEmailWithPassword = async function (
-  email: string
+userSchema.statics.isExistUserByProvider = async function (
+  provider: AUTH_PROVIDER,
+  providerId: string
 ): Promise<IUser | null> {
-  return await this.findOne({ email }).select('+password');
+  const query: any = {};
+  switch (provider) {
+    case AUTH_PROVIDER.GOOGLE:
+      query.googleId = providerId;
+      break;
+    case AUTH_PROVIDER.MICROSOFT:
+      query.microsoftId = providerId;
+      break;
+    case AUTH_PROVIDER.YAHOO:
+      query.yahooId = providerId;
+      break;
+  }
+  return await this.findOne(query);
 };
-
-// Middleware
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    return next();
-  }
-
-  const isExist = await User.findOne({ email: this.email });
-  if (isExist) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Email already exists!');
-  }
-
-  if (this.password) {
-    try {
-      const hashedPassword = await bcrypt.hash(
-        this.password,
-        Number(config.security.bcrypt_salt_rounds)
-      );
-      this.password = hashedPassword;
-    } catch (error) {
-      return next(
-        new ApiError(
-          StatusCodes.INTERNAL_SERVER_ERROR,
-          'Error hashing password'
-        )
-      );
-    }
-  }
-
-  next();
-});
 
 export const User = model<IUser, UserModal>('User', userSchema);

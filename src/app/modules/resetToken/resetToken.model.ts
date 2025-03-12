@@ -1,3 +1,4 @@
+// src\app\modules\resetToken\resetToken.model.ts
 import { model, Schema } from 'mongoose';
 import { IResetToken, ResetTokenModel } from './resetToken.interface';
 

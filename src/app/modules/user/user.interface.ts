@@ -1,51 +1,60 @@
-// src\app\modules\user\user.interface.ts
-import { Model } from 'mongoose';
-import { USER_ROLES } from '../../../enums/common';
+import { Document, Model } from 'mongoose';
+import {
+  AUTH_PROVIDER,
+  USER_GENDER,
+  USER_ROLES,
+  USER_STATUS,
+} from '../../../enums/common';
 
-export interface SetPasswordPayload {
-  email: string;
-  password?: string;
-  address?: Location;
-}
+export type IUserSubscription = {
+  plan: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  startDate: Date;
+  endDate: Date;
+  status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
+  autoRenew: boolean;
+};
 
-export type IUser = {
+export interface IUser extends Document {
+  _id: string;
   role: USER_ROLES;
   name: string;
   email: string;
+  authProvider: AUTH_PROVIDER;
   image?: string;
   phone?: string;
   password?: string;
-  postCode: string;
-  address?: Location;
+  address?: string;
+
+  // OAuth IDs and tokens
+  googleId?: string;
+  microsoftId?: string;
+  yahooId?: string;
+  googleAccessToken?: string;
+  microsoftAccessToken?: string;
+  yahooAccessToken?: string;
+  refreshToken?: string;
+
+  // Additional user info
   country?: string;
-  appId?: string;
-  fcmToken?: string;
-  status:
-    | 'active'
-    | 'deactivate'
-    | 'delete'
-    | 'block'
-    | 'pending'
-    | 'inactive'
-    | 'approved';
+  status: USER_STATUS;
   verified: boolean;
-  gender: 'male' | 'female' | 'both';
+  gender: USER_GENDER;
   dateOfBirth: Date;
-  onlineStatus?: boolean;
+  isActive?: boolean;
   lastActiveAt?: Date;
-  authentication?: {
-    isResetPassword: boolean;
-    oneTimeCode: number;
-    expireAt: Date;
-  };
   createdAt?: Date;
   updatedAt?: Date;
-};
+  lastSync: Date;
+
+  // Subscription info
+  subscription: IUserSubscription;
+}
 
 export type UserModal = {
   isExistUserById(id: string): Promise<IUser | null>;
   isExistUserByEmail(email: string): Promise<IUser | null>;
-  isAccountCreated(id: string): Promise<boolean>;
-  isMatchPassword(password: string, hashPassword: string): Promise<boolean>;
-  findByEmailWithPassword(email: string): Promise<IUser | null>;
+  isExistUserByProvider(
+    provider: AUTH_PROVIDER,
+    providerId: string
+  ): Promise<IUser | null>;
 } & Model<IUser>;

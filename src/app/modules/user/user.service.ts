@@ -1,495 +1,571 @@
 // src\app\modules\user\user.service.ts
 import { StatusCodes } from 'http-status-codes';
-import { JwtPayload, Secret } from 'jsonwebtoken';
-import mongoose, { SortOrder } from 'mongoose';
-import bcrypt from 'bcrypt';
-import { USER_ROLES } from '../../../enums/common';
+import { JwtPayload } from 'jsonwebtoken';
 import ApiError from '../../../errors/ApiError';
-import { emailHelper } from '../../../helpers/emailHelper';
-import { emailTemplate } from '../../../shared/emailTemplate';
-import generateOTP from '../../../util/generateOTP';
-import colors from 'colors';
-import { IUser, SetPasswordPayload } from './user.interface';
-import { User } from './user.model';
-import unlinkFile from '../../../shared/unlinkFile';
-import { logger } from '../../../shared/logger';
-import config from '../../../config';
 import { jwtHelper } from '../../../helpers/jwtHelper';
+import config from '../../../config';
+import { AUTH_PROVIDER, USER_STATUS } from '../../../enums/common';
+import { IUser } from './user.interface';
+import { User } from './user.model';
+import { google } from 'googleapis';
+import axios from 'axios';
+import { encryptionHelper } from '../../../helpers/encryptionHelper';
 
-const createUserIntoDB = async (payload: IUser) => {
-  const existingUser = await User.findOne({ email: payload.email });
-  if (existingUser) {
-    throw new ApiError(
-      StatusCodes.CONFLICT,
-      'An account with this email already exists. Please use a different email address.'
-    );
+// OAuth2 client setup
+const oauth2Client = new google.auth.OAuth2(
+  config.oauth.google.client_id,
+  config.oauth.google.client_secret,
+  config.oauth.google.redirect_uri
+);
+
+const refreshGoogleToken = async (userId: string) => {
+  const user = await User.findById(userId).select('+refreshToken');
+  if (!user || !user.refreshToken) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
   }
 
   try {
-    const session = await mongoose.startSession();
-    let result: any;
+    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
+    oauth2Client.setCredentials({ refresh_token: decryptedToken });
+    const { credentials } = await oauth2Client.refreshAccessToken();
 
-    await session.withTransaction(async () => {
-      if (!payload.role) payload.role = USER_ROLES.USER;
-      if (!payload.password) payload.password = config.admin.password;
+    user.googleAccessToken = credentials.access_token
+      ? encryptionHelper.encrypt(credentials.access_token)
+      : undefined;
 
-      result = await User.create([payload], { session });
-      result = result[0];
-
-      if (!result) {
-        throw new ApiError(
-          StatusCodes.BAD_REQUEST,
-          'Failed to create user account. Please try again.'
-        );
-      }
-
-      console.log('User created successfully::', result);
-
-      // Generate and send OTP
-      const otp = generateOTP();
-      const emailValues = {
-        name: result.name,
-        otp,
-        email: result.email,
-      };
-
-      const accountEmailTemplate = emailTemplate.createAccount(emailValues);
-      await emailHelper.sendEmail(accountEmailTemplate);
-
-      // Update user authentication details
-      const authentication = {
-        oneTimeCode: otp,
-        expireAt: new Date(Date.now() + 3 * 60000),
-      };
-
-      const updatedUser = await User.findOneAndUpdate(
-        { _id: result._id },
-        {
-          $set: {
-            authentication,
-            status: 'pending',
-            verified: false,
-          },
-        },
-        { new: true, session }
-      );
-
-      if (!updatedUser) {
-        throw new ApiError(
-          StatusCodes.INTERNAL_SERVER_ERROR,
-          'Failed to update user authentication details'
-        );
-      }
-    });
-
-    await session.endSession();
-
-    return {
-      email: result.email,
-      status: 'success',
-      message:
-        'Registration successful. Please check your email for verification code.',
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      const mongoError = error as any;
-      if (mongoError.code === 11000) {
-        throw new ApiError(
-          StatusCodes.CONFLICT,
-          'An account with this email already exists. Please use a different email address.'
-        );
-      }
+    if (credentials.refresh_token) {
+      user.refreshToken = encryptionHelper.encrypt(credentials.refresh_token);
     }
 
-    logger.error('User creation error:', error);
+    await user.save();
+    return credentials.access_token;
+  } catch (error) {
+    console.error('Token refresh error:', error);
     throw new ApiError(
       StatusCodes.INTERNAL_SERVER_ERROR,
-      'Failed to create user account. Please try again later.'
+      'Failed to refresh token'
     );
   }
 };
 
-// const setUserNewPassword = async (payload: SetPasswordPayload) => {
-//   const { email, password, address } = payload;
+const googleLoginIntoDB = async (payload: any) => {
+  const { code } = payload;
 
-//   const user = await User.findOne({ email });
+  try {
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
 
-//   if (!user) {
-//     throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-//   }
+    const oauth2 = google.oauth2({ auth: oauth2Client, version: 'v2' });
+    const { data } = await oauth2.userinfo.get();
 
-//   if (!user.verified) {
-//     throw new ApiError(
-//       StatusCodes.BAD_REQUEST,
-//       'Please verify your email first'
-//     );
-//   }
+    if (!data.email) {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Email not provided by Google'
+      );
+    }
 
-//   const hashedPassword = await bcrypt.hash(
-//     password,
-//     Number(config.bcrypt_salt_rounds)
-//   );
+    // Check if user exists with this email
+    let user = await User.isExistUserByEmail(data.email);
 
-//   const session = await mongoose.startSession();
-//   let updatedUser;
+    if (user) {
+      // Update existing user's Google credentials
+      user.googleId = data.id ?? undefined;
+      user.googleAccessToken = tokens.access_token
+        ? encryptionHelper.encrypt(tokens.access_token)
+        : undefined;
 
-//   try {
-//     await session.withTransaction(async () => {
-//       // Update user with password and set status to active
-//       updatedUser = await User.findByIdAndUpdate(
-//         user._id,
-//         {
-//           password: hashedPassword,
-//           address,
-//           status: 'active',
-//         },
-//         { new: true, session }
-//       ).select('-password');
+      if (tokens.refresh_token) {
+        user.refreshToken = tokens.refresh_token
+          ? encryptionHelper.encrypt(tokens.refresh_token)
+          : undefined;
+      }
+      user.authProvider = AUTH_PROVIDER.GOOGLE;
+      user.lastSync = new Date(); // Update lastSync
+      await user.save();
+    } else {
+      // Create new user with encrypted tokens
+      user = await User.create({
+        email: data.email,
+        name: data.name,
+        image: data.picture,
+        authProvider: AUTH_PROVIDER.GOOGLE,
+        googleId: data.id,
+        googleAccessToken: tokens.access_token
+          ? encryptionHelper.encrypt(tokens.access_token)
+          : undefined,
+        refreshToken: tokens.refresh_token
+          ? encryptionHelper.encrypt(tokens.refresh_token)
+          : undefined,
+        verified: true,
+        status: USER_STATUS.ACTIVE,
+        lastSync: new Date(),
+      });
+    }
 
-//       if (!updatedUser) {
-//         throw new ApiError(
-//           StatusCodes.INTERNAL_SERVER_ERROR,
-//           'Failed to update user'
-//         );
-//       }
-
-//       // Send admin notifications since the user registration is now complete
-//       const adminUsers = await User.find({ role: USER_ROLES.ADMIN }).select(
-//         '_id'
-//       );
-
-//       // Create notifications for each admin
-//       const notificationPromises = adminUsers.map(admin => {
-//         const notificationData: Partial<INotification> = {
-//           message: `New ${user.role.toLowerCase()}, Name: ${
-//             user.name
-//           }, Email: (${user.email}) has completed registration.`,
-//           type: 'ADMIN',
-//           receiver: admin._id,
-//           metadata: {
-//             userId: user._id,
-//             userEmail: user.email,
-//             userName: user.name,
-//             userRole: user.role,
-//             action: `new_${user.role.toLowerCase()}_registration_completed`,
-//           },
-//         };
-//         return sendNotifications(notificationData); // send notification using socketIO or other notification system
-//         // return NotificationService.createNotification(notificationData);
-//       });
-
-//       await Promise.all(notificationPromises);
-//     });
-
-//     await session.endSession();
-
-//     // Generate access token after successful password set
-//     const accessToken = jwtHelper.createToken(
-//       {
-//         id: user._id,
-//         role: user.role,
-//         email: user.email,
-//         name: user.name,
-//       },
-//       config.jwt.jwt_secret as Secret,
-//       config.jwt.jwt_expire_in as string
-//     );
-
-//     return {
-//       accessToken,
-//       data: updatedUser,
-//     };
-//   } catch (error) {
-//     await session.endSession();
-//     logger.error('Set password error:', error);
-//     throw new ApiError(
-//       StatusCodes.INTERNAL_SERVER_ERROR,
-//       'Failed to set password. Please try again later.'
-//     );
-//   }
-// };
-
-const getAllUsers = async (query: Record<string, unknown>) => {
-  const {
-    searchTerm,
-    page = 1,
-    limit = 10,
-    sortBy = 'createdAt',
-    order = 'desc',
-    ...filterData
-  } = query;
-
-  // Search conditions
-  const conditions: any[] = [];
-
-  if (searchTerm) {
-    const cleanedSearchTerm = searchTerm.toString().replace(/[+\s-]/g, '');
-
-    conditions.push({
-      $or: [
-        { name: { $regex: searchTerm, $options: 'i' } },
-        { email: { $regex: searchTerm, $options: 'i' } },
-        {
-          phone: {
-            $regex: cleanedSearchTerm,
-            $options: 'i',
-          },
-        },
-      ],
-    });
-  }
-
-  // Add filter conditions
-  if (Object.keys(filterData).length > 0) {
-    const filterConditions = Object.entries(filterData).map(
-      ([field, value]) => ({
-        [field]: value,
-      })
+    // Generate JWT token
+    const accessToken = jwtHelper.createToken(
+      { userId: user._id },
+      config.jwt.secret as string,
+      config.jwt.expire_in as string
     );
-    conditions.push({ $and: filterConditions });
-  }
-
-  const whereConditions = conditions.length ? { $and: conditions } : {};
-
-  // Pagination setup
-  const currentPage = Number(page);
-  const pageSize = Number(limit);
-  const skip = (currentPage - 1) * pageSize;
-
-  // Sorting setup
-  const sortOrder = order === 'desc' ? -1 : 1;
-  const sortCondition: { [key: string]: SortOrder } = {
-    [sortBy as string]: sortOrder,
-  };
-
-  // Query the database
-  const [users, total, genderStats] = await Promise.all([
-    User.find(whereConditions)
-      .sort(sortCondition)
-      .skip(skip)
-      .limit(pageSize)
-      .lean<IUser[]>(),
-    User.countDocuments(whereConditions),
-    User.aggregate([
-      {
-        $group: {
-          _id: '$gender',
-          count: { $sum: 1 },
-        },
-      },
-    ]),
-  ]);
-
-  // Calculate gender ratios
-  const totalUsers = genderStats.reduce((acc, curr) => acc + curr.count, 0);
-  const genderRatio = genderStats.reduce((acc, { _id, count }) => {
-    if (_id) {
-      acc[_id] = {
-        count,
-        percentage: ((count / totalUsers) * 100).toFixed(2) + '%',
-      };
-    }
-    return acc;
-  }, {} as Record<string, { count: number; percentage: string }>);
-
-  // Format the updatedAt field
-  const formattedUsers = users?.map(user => ({
-    ...user,
-    updatedAt: user.updatedAt
-      ? new Date(user.updatedAt).toISOString().split('T')[0]
-      : null,
-  }));
-
-  // Meta information for pagination and gender stats
-  return {
-    meta: {
-      total,
-      limit: pageSize,
-      totalPages: Math.ceil(total / pageSize),
-      currentPage,
-      genderRatio,
-    },
-    result: formattedUsers,
-  };
-};
-
-const getUserProfileFromDB = async (
-  user: JwtPayload
-): Promise<Partial<IUser>> => {
-  const { id } = user;
-  const isExistUser = await User.findById(id);
-  if (!isExistUser) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "User doesn't exist!");
-  }
-
-  return isExistUser;
-};
-
-const updateProfileToDB = async (
-  user: JwtPayload,
-  payload: Partial<IUser>
-): Promise<
-  Partial<IUser | null> | { verificationRequired: boolean; message: string }
-> => {
-  const { id } = user;
-  const isExistUser = await User.isExistUserById(id);
-
-  if (!isExistUser) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, "User doesn't exist!");
-  }
-
-  // Check if email or phone is being updated
-  const needsVerification = payload.email || payload.phone;
-
-  if (needsVerification) {
-    // Check if new email already exists
-    if (payload.email) {
-      const emailExists = await User.findOne({
-        email: payload.email,
-        _id: { $ne: id }, // Exclude current user
-      });
-
-      if (emailExists) {
-        throw new ApiError(
-          StatusCodes.CONFLICT,
-          'Email already exists. Please use a different email address.'
-        );
-      }
-    }
-
-    // Check if new phone already exists
-    if (payload.phone) {
-      const phoneExists = await User.findOne({
-        phone: payload.phone,
-        _id: { $ne: id }, // Exclude current user
-      });
-
-      if (phoneExists) {
-        throw new ApiError(
-          StatusCodes.CONFLICT,
-          'Phone number already exists. Please use a different number.'
-        );
-      }
-    }
-
-    // Generate OTP for verification
-    const otp = generateOTP();
-    const authentication = {
-      oneTimeCode: otp,
-      expireAt: new Date(Date.now() + 3 * 60000), // 3 minutes
-      isResetPassword: false,
-    };
-
-    // Store the pending changes and authentication data
-    const pendingChanges = {
-      ...(payload.email && { email: payload.email }),
-      ...(payload.phone && { phone: payload.phone }),
-      authentication,
-      verified: false,
-      status: 'pending',
-    };
-
-    // Send OTP to new email if email is being updated
-    if (payload.email) {
-      const emailValues = {
-        name: isExistUser.name,
-        otp,
-        email: payload.email,
-      };
-      const verificationEmailTemplate =
-        emailTemplate.createAccount(emailValues);
-      await emailHelper.sendEmail(verificationEmailTemplate);
-    }
-
-    // Update user with pending changes
-    await User.findOneAndUpdate({ _id: id }, pendingChanges, { new: true });
 
     return {
-      verificationRequired: true,
-      message:
-        'Please verify your new contact information with the OTP sent to your email.',
-    };
-  }
-
-  // Handle image update
-  if (payload.image && isExistUser.image) {
-    unlinkFile(isExistUser.image);
-  }
-
-  // Process normal update without verification
-  const updateDoc = await User.findOneAndUpdate({ _id: id }, payload, {
-    new: true,
-  });
-
-  return updateDoc;
-};
-
-const getSingleUser = async (id: string): Promise<IUser | null> => {
-  const result = await User.findById(id);
-  return result;
-};
-
-const getOnlineUsers = async () => {
-  try {
-    const onlineUsers = await User.find({
-      onlineStatus: true,
-      // lastActiveAt: {
-      //   $gte: new Date(Date.now() - 5 * 60 * 1000),
-      // },
-    }).select('name email profileImage');
-
-    logger.info(
-      colors.green(`[UserService] Retrieved ${onlineUsers.length} online users`)
-    );
-
-    return onlineUsers;
-  } catch (error) {
-    logger.error(
-      colors.red('[UserService] Error retrieving online users:'),
-      error
-    );
-    throw error;
-  }
-};
-
-const updateUserOnlineStatus = async (userId: string, isOnline: boolean) => {
-  try {
-    const user = await User.findByIdAndUpdate(
-      userId,
-      {
-        onlineStatus: isOnline,
-        lastActiveAt: new Date(),
+      accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        image: user.image,
       },
-      { new: true }
+    };
+  } catch (error) {
+    console.error('Authentication error:', error);
+    if (axios.isAxiosError(error)) {
+      throw new ApiError(
+        StatusCodes.INTERNAL_SERVER_ERROR,
+        `Failed to authenticate with provider: ${
+          error.response?.data?.error || error.message
+        }`
+      );
+    }
+    throw new ApiError(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      `Failed to authenticate with provider: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`
+    );
+  }
+};
+
+const refreshMicrosoftToken = async (userId: string) => {
+  const user = await User.findById(userId).select('+refreshToken');
+  if (!user || !user.refreshToken) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
+  }
+
+  try {
+    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
+
+    // Request new access token using refresh token
+    const tokenResponse = await axios.post(
+      'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+      new URLSearchParams({
+        client_id: config.oauth.microsoft.client_id as string,
+        client_secret: config.oauth.microsoft.client_secret as string,
+        refresh_token: decryptedToken,
+        grant_type: 'refresh_token',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
     );
 
-    if (!user) {
-      throw new Error('User not found');
+    // Update tokens in database
+    user.microsoftAccessToken = tokenResponse.data.access_token
+      ? encryptionHelper.encrypt(tokenResponse.data.access_token)
+      : undefined;
+
+    if (tokenResponse.data.refresh_token) {
+      user.refreshToken = encryptionHelper.encrypt(
+        tokenResponse.data.refresh_token
+      );
     }
 
-    logger.info(
-      colors.green(
-        `[UserService] User ${userId} online status updated to ${isOnline}`
-      )
+    user.lastSync = new Date();
+    await user.save();
+    return tokenResponse.data.access_token;
+  } catch (error) {
+    console.error('Microsoft token refresh error:', error);
+    throw new ApiError(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      'Failed to refresh Microsoft token'
+    );
+  }
+};
+
+const refreshYahooToken = async (userId: string) => {
+  const user = await User.findById(userId).select('+refreshToken');
+  if (!user || !user.refreshToken) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
+  }
+
+  try {
+    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
+
+    // Request new access token using refresh token
+    const tokenResponse = await axios.post(
+      'https://api.login.yahoo.com/oauth2/get_token',
+      new URLSearchParams({
+        client_id: config.oauth.yahoo.client_id as string,
+        client_secret: config.oauth.yahoo.client_secret as string,
+        refresh_token: decryptedToken,
+        grant_type: 'refresh_token',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
     );
 
-    return user;
+    // Update tokens in database
+    user.yahooAccessToken = tokenResponse.data.access_token
+      ? encryptionHelper.encrypt(tokenResponse.data.access_token)
+      : undefined;
+
+    if (tokenResponse.data.refresh_token) {
+      user.refreshToken = encryptionHelper.encrypt(
+        tokenResponse.data.refresh_token
+      );
+    }
+
+    user.lastSync = new Date();
+    await user.save();
+    return tokenResponse.data.access_token;
   } catch (error) {
-    logger.error(
-      colors.red(`[UserService] Error updating user ${userId} online status:`),
-      error
+    console.error('Yahoo token refresh error:', error);
+    throw new ApiError(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      'Failed to refresh Yahoo token'
     );
-    throw error;
   }
+};
+
+const microsoftLoginIntoDB = async (payload: any) => {
+  const { code } = payload;
+
+  try {
+    // Exchange code for tokens
+    const tokenResponse = await axios.post(
+      'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+      new URLSearchParams({
+        client_id: config.oauth.microsoft.client_id as string,
+        client_secret: config.oauth.microsoft.client_secret as string,
+        code,
+        redirect_uri: config.oauth.microsoft.redirect_uri as string,
+        grant_type: 'authorization_code',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    // Get user info from Microsoft Graph API
+    const userResponse = await axios.get(
+      'https://graph.microsoft.com/v1.0/me',
+      {
+        headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
+      }
+    );
+
+    const { id, mail, displayName } = userResponse.data;
+
+    if (!mail) {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Email not provided by Microsoft'
+      );
+    }
+
+    // Check if user exists
+    let user = await User.isExistUserByEmail(mail);
+
+    if (user) {
+      // Update existing user's Microsoft credentials
+      user.microsoftId = id;
+      user.microsoftAccessToken = encryptionHelper.encrypt(
+        tokenResponse.data.access_token
+      );
+      if (tokenResponse.data.refresh_token) {
+        user.refreshToken = encryptionHelper.encrypt(
+          tokenResponse.data.refresh_token
+        );
+      }
+      user.authProvider = AUTH_PROVIDER.MICROSOFT;
+      user.lastSync = new Date();
+      await user.save();
+    } else {
+      // Create new user with encrypted tokens
+      user = await User.create({
+        email: mail,
+        name: displayName,
+        authProvider: AUTH_PROVIDER.MICROSOFT,
+        microsoftId: id,
+        microsoftAccessToken: encryptionHelper.encrypt(
+          tokenResponse.data.access_token
+        ),
+        refreshToken: tokenResponse.data.refresh_token
+          ? encryptionHelper.encrypt(tokenResponse.data.refresh_token)
+          : undefined,
+        verified: true,
+        status: USER_STATUS.ACTIVE,
+        lastSync: new Date(),
+      });
+    }
+
+    // Generate JWT token
+    const accessToken = jwtHelper.createToken(
+      { userId: user._id },
+      config.jwt.secret as string,
+      config.jwt.expire_in as string
+    );
+
+    return {
+      accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        image: user.image,
+      },
+    };
+  } catch (error) {
+    console.error('Authentication error:', error);
+    if (axios.isAxiosError(error)) {
+      throw new ApiError(
+        StatusCodes.INTERNAL_SERVER_ERROR,
+        `Failed to authenticate with provider: ${
+          error.response?.data?.error || error.message
+        }`
+      );
+    }
+    throw new ApiError(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      `Failed to authenticate with provider: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`
+    );
+  }
+};
+
+const yahooLoginIntoDB = async (payload: any) => {
+  const { code } = payload;
+
+  try {
+    // Exchange code for tokens
+    const tokenResponse = await axios.post(
+      'https://api.login.yahoo.com/oauth2/get_token',
+      new URLSearchParams({
+        client_id: config.oauth.yahoo.client_id as string,
+        client_secret: config.oauth.yahoo.client_secret as string,
+        code,
+        redirect_uri: config.oauth.yahoo.redirect_uri as string,
+        grant_type: 'authorization_code',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    // Get user info
+    const userResponse = await axios.get(
+      'https://api.login.yahoo.com/openid/v1/userinfo',
+      {
+        headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
+      }
+    );
+
+    const { sub, email, name } = userResponse.data;
+
+    if (!email) {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Email not provided by Yahoo'
+      );
+    }
+
+    // Check if user exists
+    let user = await User.isExistUserByEmail(email);
+
+    if (user) {
+      // Update existing user's Yahoo credentials
+      user.yahooId = sub;
+      user.yahooAccessToken = encryptionHelper.encrypt(
+        tokenResponse.data.access_token
+      );
+      if (tokenResponse.data.refresh_token) {
+        user.refreshToken = encryptionHelper.encrypt(
+          tokenResponse.data.refresh_token
+        );
+      }
+      user.authProvider = AUTH_PROVIDER.YAHOO;
+      user.lastSync = new Date();
+      await user.save();
+    } else {
+      // Create new user with encrypted tokens
+      user = await User.create({
+        email,
+        name,
+        authProvider: AUTH_PROVIDER.YAHOO,
+        yahooId: sub,
+        yahooAccessToken: encryptionHelper.encrypt(
+          tokenResponse.data.access_token
+        ),
+        refreshToken: tokenResponse.data.refresh_token
+          ? encryptionHelper.encrypt(tokenResponse.data.refresh_token)
+          : undefined,
+        verified: true,
+        status: USER_STATUS.ACTIVE,
+        lastSync: new Date(),
+      });
+    }
+
+    // Generate JWT token
+    const accessToken = jwtHelper.createToken(
+      { userId: user._id },
+      config.jwt.secret as string,
+      config.jwt.expire_in as string
+    );
+
+    return {
+      accessToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        image: user.image,
+      },
+    };
+  } catch (error) {
+    console.error('Authentication error:', error);
+    if (axios.isAxiosError(error)) {
+      throw new ApiError(
+        StatusCodes.INTERNAL_SERVER_ERROR,
+        `Failed to authenticate with provider: ${
+          error.response?.data?.error || error.message
+        }`
+      );
+    }
+    throw new ApiError(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      `Failed to authenticate with provider: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`
+    );
+  }
+};
+
+const updateProfile = async (userId: string, profileData: Partial<IUser>) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  // Only allow updating specific fields
+  const allowedUpdates = [
+    'name',
+    'phone',
+    'address',
+    'country',
+    'gender',
+    'dateOfBirth',
+  ] as const;
+
+  // Create a type-safe version of the allowed updates
+  type AllowedUpdateKeys = (typeof allowedUpdates)[number];
+
+  // Filter out any fields that aren't in allowedUpdates
+  const filteredData = Object.keys(profileData).reduce((acc, key) => {
+    if (allowedUpdates.includes(key as AllowedUpdateKeys)) {
+      // Type assertion to handle the index signature issue
+      (acc as any)[key] = profileData[key as keyof typeof profileData];
+    }
+    return acc;
+  }, {} as Partial<IUser>);
+
+  // Update user with filtered data
+  Object.assign(user, filteredData);
+
+  // Update lastSync timestamp
+  user.lastSync = new Date();
+
+  await user.save();
+  return user;
+};
+
+const logout = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  // Clear OAuth tokens
+  user.googleAccessToken = undefined;
+  user.microsoftAccessToken = undefined;
+  user.yahooAccessToken = undefined;
+  user.refreshToken = undefined;
+  user.lastSync = new Date();
+  await user.save();
+
+  return null;
+};
+
+const getCurrentUser = async (userId: string) => {
+  const user = await User.findById(userId).select('-password');
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+  return user;
+};
+
+// In updateSubscription method
+const updateSubscription = async (userId: string, subscriptionData: any) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  // Define plan types with type safety
+  type SubscriptionPlan = 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+
+  // If plan is changing, update end date accordingly
+  if (
+    subscriptionData.plan &&
+    subscriptionData.plan !== user.subscription.plan
+  ) {
+    // Calculate new end date based on plan with type-safe index
+    const endDateMap: Record<SubscriptionPlan, Date> = {
+      FREE: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      BASIC: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+      PRO: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+      ENTERPRISE: new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000), // 2 years
+    };
+
+    subscriptionData.startDate = new Date();
+    subscriptionData.endDate =
+      endDateMap[subscriptionData.plan as SubscriptionPlan];
+    subscriptionData.status = 'ACTIVE';
+  }
+
+  user.subscription = {
+    ...user.subscription,
+    ...subscriptionData,
+  };
+
+  user.lastSync = new Date();
+  await user.save();
+  return user;
 };
 
 export const UserService = {
-  createUserIntoDB,
-  // setUserNewPassword,
-  getUserProfileFromDB,
-  updateProfileToDB,
-  getAllUsers,
-  getSingleUser,
-  getOnlineUsers,
-  updateUserOnlineStatus,
+  googleLoginIntoDB,
+  microsoftLoginIntoDB,
+  yahooLoginIntoDB,
+  refreshGoogleToken,
+  refreshMicrosoftToken,
+  refreshYahooToken,
+  updateProfile,
+  logout,
+  getCurrentUser,
+  updateSubscription,
 };

@@ -1,97 +1,88 @@
 // src\app\modules\user\user.validation.ts
-
 import { z } from 'zod';
+import {
+  USER_GENDER,
+} from '../../../enums/common';
 
-const locationSchema = z.object({
-  locationName: z.string().min(1).optional(),
-  latitude: z.number().min(-90).max(90).optional(),
-  longitude: z.number().min(-180).max(180).optional(),
-});
+// Common validation rules
+const emailSchema = z
+  .string({
+    required_error: 'Email is required',
+  })
+  .email('Invalid email address')
+  .min(5, 'Email must be at least 5 characters')
+  .max(255, 'Email must not exceed 255 characters')
+  .transform(val => val.toLowerCase().trim());
 
-const createUserZodSchema = z.object({
-  name: z.string({
+const nameSchema = z
+  .string({
     required_error: 'Name is required',
+  })
+  .min(2, 'Name must be at least 2 characters')
+  .max(100, 'Name must not exceed 100 characters')
+  .trim();
+
+const phoneSchema = z
+  .string()
+  .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
+  .optional();
+
+const addressSchema = z
+  .string()
+  .max(500, 'Address must not exceed 500 characters')
+  .optional();
+
+const countrySchema = z
+  .string()
+  .min(2, 'Country must be at least 2 characters')
+  .max(100, 'Country must not exceed 100 characters')
+  .optional();
+
+const dateSchema = z
+  .string()
+  .refine(val => !isNaN(Date.parse(val)), {
+    message: 'Invalid date format (expected ISO 8601)',
+  })
+  .transform(val => new Date(val))
+  .optional();
+
+// OAuth login schema
+const oauthLoginSchema = z.object({
+  body: z.object({
+    code: z.string({
+      required_error: 'Authorization code is required',
+    }),
   }),
-  email: z
-    .string({
-      required_error: 'Email is required',
-    })
-    .email('Invalid email address'),
-  role: z
-    .enum(['USER', 'ADMIN', 'HOST'], {
-      required_error: 'Role is required',
-    })
-    .default('USER'),
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .optional(),
-  phone: z.string().optional(),
-  image: z.string().optional(),
-  address: z
+});
+
+// Update profile schema
+const updateProfileSchema = z.object({
+  body: z
     .object({
-      locationName: z.string().optional(),
-      latitude: z.number().optional(),
-      longitude: z.number().optional(),
+      name: nameSchema.optional(),
+      phone: phoneSchema,
+      address: addressSchema,
+      country: countrySchema,
+      gender: z
+        .enum([...Object.values(USER_GENDER)] as [string, ...string[]])
+        .optional(),
+      dateOfBirth: dateSchema,
     })
-    .optional(),
-  postCode: z.string().optional(),
-  gender: z.enum(['male', 'female', 'both']).optional(),
-  dateOfBirth: z
-    .string()
-    .refine(val => !isNaN(Date.parse(val)), {
-      message: 'Invalid date format',
-    })
-    .optional(),
+    .strict(),
 });
 
-const setPasswordZodSchema = z.object({
-  body: z.object({
-    email: z
-      .string({
-        required_error: 'Email is required',
-      })
-      .email('Invalid email address'),
-    address: z
-      .object({
-        locationName: z.string().optional(),
-        latitude: z.number().optional(),
-        longitude: z.number().optional(),
-      })
-      .optional(),
-    password: z
-      .string({
-        required_error: 'Password is required',
-      })
-      .min(8, 'Password must be at least 8 characters'),
-  }),
-});
-
-const updateZodSchema = z.object({
-  name: z.string().optional(),
-  phone: z.string().optional(),
-  address: locationSchema.optional(),
-  postCode: z.string().optional(),
-  country: z.string().optional(),
-  image: z.string().optional(),
-  dateOfBirth: z
-    .string()
-    .refine(val => !isNaN(Date.parse(val)), {
-      message: 'Invalid date format. Use ISO 8601 format.',
+// Update subscription schema
+const updateSubscriptionSchema = z.object({
+  body: z
+    .object({
+      plan: z.enum(['FREE', 'BASIC', 'PRO', 'ENTERPRISE']),
+      autoRenew: z.boolean().optional(),
     })
-    .optional(),
-});
-
-const updateLocationZodSchema = z.object({
-  body: z.object({
-    longitude: z.string({ required_error: 'Longitude is required' }),
-    latitude: z.string({ required_error: 'Latitude is required' }),
-  }),
+    .strict(),
 });
 
 export const UserValidation = {
-  createUserZodSchema,
-  updateZodSchema,
-  setPasswordZodSchema,
-  updateLocationZodSchema,
+  oauthLoginSchema,
+  updateProfileSchema,
+  updateSubscriptionSchema,
 };

@@ -13,6 +13,9 @@ export default {
   node_env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 4000,
   google_maps: process.env.GOOGLE_MAPS,
+  encryption: {
+    key: process.env.ENCRYPTION_KEY
+  },
 
   database: {
     mongodb_uri: process.env.MONGODB_URI,

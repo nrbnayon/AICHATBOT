@@ -1,11 +1,9 @@
-import express, { NextFunction, Request, Response } from 'express';
-import { USER_ROLES } from '../../../enums/common';
-import auth from '../../middlewares/auth';
-import fileUploadHandler from '../../middlewares/fileUploadHandler';
-import validateRequest from '../../middlewares/validateRequest';
+// src\app\modules\user\user.route.ts
+import express from 'express';
 import { UserController } from './user.controller';
+import auth from '../../middlewares/auth';
+import validateRequest from '../../middlewares/validateRequest';
 import { UserValidation } from './user.validation';
-import getFilePath from '../../../shared/getFilePath';
 import {
   apiLimiter,
   authLimiter,
@@ -13,36 +11,48 @@ import {
 
 const router = express.Router();
 
-/**
- * User Management Routes
- * ===========================================
- * Handles all user-related operations including:
- * - User registration
- * - Profile management
- * - Admin user management
- * - Online status tracking
- */
-
-/**
- * User Registration
- * -------------------------------------------
- * Public routes for user registration and setup
- */
-
-/**
- * @route   POST /users/create-user
- * @desc    Register a new user with profile image
- * @access  Public
- * @rateLimit 5 attempts per 10 minutes
- */
+// OAuth routes
 router.post(
-  '/create-user',
+  '/auth/google',
+  authLimiter,
+  validateRequest(UserValidation.oauthLoginSchema),
+  UserController.googleLogin
+);
 
-  async (req: Request, res: Response, next: NextFunction) => {
-    res.send(
-      '<h1 style="text-align:center; color:#A55FEF; font-family:Verdana;">Hey Frontend Developer, How can I assist you today!</h1>'
-    );
-  }
+router.post(
+  '/auth/microsoft',
+  authLimiter,
+  validateRequest(UserValidation.oauthLoginSchema),
+  UserController.microsoftLogin
+);
+
+router.post(
+  '/auth/yahoo',
+  authLimiter,
+  validateRequest(UserValidation.oauthLoginSchema),
+  UserController.yahooLogin
+);
+
+// User management routes
+router.get('/me', auth(), apiLimiter, UserController.getCurrentUser);
+
+router.patch(
+  '/profile',
+  auth(),
+  apiLimiter,
+  validateRequest(UserValidation.updateProfileSchema),
+  UserController.updateProfile
+);
+
+router.post('/logout', auth(), apiLimiter, UserController.logout);
+
+// Subscription management
+router.patch(
+  '/subscription',
+  auth(),
+  apiLimiter,
+  validateRequest(UserValidation.updateSubscriptionSchema),
+  UserController.updateSubscription
 );
 
 export const UserRoutes = router;

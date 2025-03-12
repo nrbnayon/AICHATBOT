@@ -8,3 +8,19 @@ export enum AUTH_PROVIDER {
   MICROSOFT = 'microsoft', // outlook
   YAHOO = 'yahoo', // yahoo
 }
+
+export enum USER_STATUS {
+  ACTIVE = 'active',
+  DEACTIVATE = 'deactivate',
+  DELETE = 'delete',
+  BLOCK = 'block',
+  PENDING = 'pending',
+  INACTIVE = 'inactive',
+  APPROVED = 'approved',
+}
+export enum USER_GENDER {
+  MALE = 'male',
+  FEMALE = 'female',
+  BOTH = 'both',
+  OTHERS = 'others',
+}

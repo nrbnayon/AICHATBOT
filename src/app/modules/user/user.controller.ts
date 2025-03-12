@@ -4,122 +4,134 @@ import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
 import sendResponse from '../../../shared/sendResponse';
 import { UserService } from './user.service';
-import { logger } from '../../../shared/logger';
 
-const createUser = catchAsync(
+const googleLogin = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const value = { ...req.body };
-      const result = await UserService.createUserIntoDB(value);
+      const result = await UserService.googleLoginIntoDB(req.body);
+
+      // Set JWT token in HTTP-only cookie
+      res.cookie('token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
 
       sendResponse(res, {
         success: true,
         statusCode: StatusCodes.OK,
-        message:
-          'Please check your email to verify your account. We have sent you an OTP to complete the registration process.',
-        data: result.email,
+        message: 'Login successful using Google authentication',
+        data: result.user,
       });
     } catch (error) {
-      if (error instanceof Error) {
-        next(error);
-      } else {
-        next(new Error('An unknown error occurred'));
-      }
+      next(error);
     }
   }
 );
 
-
-const getUserProfile = catchAsync(async (req: Request, res: Response) => {
-  const user = req.user;
-  const result = await UserService.getUserProfileFromDB(user);
-
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: 'Profile data retrieved successfully',
-    data: result,
-  });
-});
-
-const updateProfile = catchAsync(
+const microsoftLogin = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const user = req.user;
-    const updateData = req.body;
-    const result = await UserService.updateProfileToDB(user, updateData);
+    try {
+      const result = await UserService.microsoftLoginIntoDB(req.body);
 
-    sendResponse(res, {
-      success: true,
-      statusCode: StatusCodes.OK,
-      message: 'Profile updated successfully',
-      data: result,
-    });
+      res.cookie('token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+      sendResponse(res, {
+        success: true,
+        statusCode: StatusCodes.OK,
+        message: 'Login successful using Microsoft authentication',
+        data: result.user,
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 );
 
-const getAllUser = catchAsync(async (req: Request, res: Response) => {
-  const result = await UserService.getAllUsers(req.query);
+const yahooLogin = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await UserService.yahooLoginIntoDB(req.body);
 
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: 'User retrieved successfully',
-    data: result,
-  });
-});
+      res.cookie('token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
 
-const getSingleUser = catchAsync(async (req: Request, res: Response) => {
-  const result = await UserService.getSingleUser(req.params.id);
-
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: 'User retrieved successfully',
-    data: result,
-  });
-});
-
-const getOnlineUsers = catchAsync(async (req: Request, res: Response) => {
-  const onlineUsers = await UserService.getOnlineUsers();
-
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: `Online users retrieved successfully. Total: ${onlineUsers.length}`,
-    data: onlineUsers,
-  });
-});
-
-const updateOnlineStatus = catchAsync(async (req: Request, res: Response) => {
-  const { userId, status } = req.body;
-  if (!userId || typeof status !== 'boolean') {
-    return sendResponse(res, {
-      success: false,
-      statusCode: StatusCodes.BAD_REQUEST,
-      message: 'Invalid userId or status. Please provide valid inputs.',
-    });
+      sendResponse(res, {
+        success: true,
+        statusCode: StatusCodes.OK,
+        message: 'Login successful using Yahoo authentication',
+        data: result.user,
+      });
+    } catch (error) {
+      next(error);
+    }
   }
+);
 
-  logger.info(`Controller: Updating user ${userId} online status to ${status}`);
-
-  const updatedUser = await UserService.updateUserOnlineStatus(userId, status);
+const updateProfile = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.updateProfile(req.user?.userId, req.body);
 
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
-    message: `User online status updated successfully to ${
-      status ? 'online' : 'offline'
-    }`,
-    data: updatedUser,
+    message: 'Profile updated successfully',
+    data: result,
+  });
+});
+
+const logout = catchAsync(async (req: Request, res: Response) => {
+  await UserService.logout(req.user?.userId);
+  res.clearCookie('token');
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Logged out successfully',
+    data: null,
+  });
+});
+
+const getCurrentUser = catchAsync(async (req: Request, res: Response) => {
+  const user = await UserService.getCurrentUser(req.user?.userId);
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'User retrieved successfully',
+    data: user,
+  });
+});
+
+const updateSubscription = catchAsync(async (req: Request, res: Response) => {
+  const result = await UserService.updateSubscription(
+    req.user?.userId,
+    req.body
+  );
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Subscription updated successfully',
+    data: result,
   });
 });
 
 export const UserController = {
-  createUser,
-  getUserProfile,
+  googleLogin,
+  microsoftLogin,
+  yahooLogin,
   updateProfile,
-  getAllUser,
-  getSingleUser,
-  getOnlineUsers,
-  updateOnlineStatus,
+  logout,
+  getCurrentUser,
+  updateSubscription,
 };
