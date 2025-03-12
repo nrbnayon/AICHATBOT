@@ -1,6 +1,6 @@
 // src\app\modules\user\user.interface.ts
 import { Model } from 'mongoose';
-import { USER_ROLES } from '../../../enums/user';
+import { USER_ROLES } from '../../../enums/common';
 
 export interface SetPasswordPayload {
   email: string;
@@ -12,6 +12,7 @@ export type IUser = {
   role: USER_ROLES;
   name: string;
   email: string;
+  image?: string;
   phone?: string;
   password?: string;
   postCode: string;
@@ -30,7 +31,6 @@ export type IUser = {
   verified: boolean;
   gender: 'male' | 'female' | 'both';
   dateOfBirth: Date;
-  image: string;
   onlineStatus?: boolean;
   lastActiveAt?: Date;
   authentication?: {

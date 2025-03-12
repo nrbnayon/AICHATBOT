@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import { StatusCodes } from 'http-status-codes';
 import { model, Schema } from 'mongoose';
 import config from '../../../config';
-import { USER_ROLES } from '../../../enums/user';
+import { USER_ROLES } from '../../../enums/common';
 import ApiError from '../../../errors/ApiError';
 import { IUser, UserModal } from './user.interface';
 

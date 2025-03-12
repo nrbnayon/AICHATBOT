@@ -1,4 +1,4 @@
-import { USER_ROLES } from "../enums/user";
+import { USER_ROLES } from '../enums/common';
 export type SocialLoginType = 'GOOGLE' | 'APPLE';
 
 export type IVerifyEmail = {
@@ -11,17 +11,15 @@ export type ILoginData = {
   password: string;
 };
 
-
 export interface ISocialLoginData {
   email?: string;
   name?: string;
   type: SocialLoginType;
-  appId?: string; 
-  fcmToken?: string; 
+  appId?: string;
+  fcmToken?: string;
   role: USER_ROLES;
   image?: string;
 }
-
 
 export type IAuthResetPassword = {
   newPassword: string;
