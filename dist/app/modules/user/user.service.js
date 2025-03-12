@@ -8,17 +8,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -26,362 +15,408 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserService = void 0;
 // src\app\modules\user\user.service.ts
 const http_status_codes_1 = require("http-status-codes");
-const mongoose_1 = __importDefault(require("mongoose"));
-const user_1 = require("../../../enums/user");
 const ApiError_1 = __importDefault(require("../../../errors/ApiError"));
-const emailHelper_1 = require("../../../helpers/emailHelper");
-const emailTemplate_1 = require("../../../shared/emailTemplate");
-const generateOTP_1 = __importDefault(require("../../../util/generateOTP"));
-const colors_1 = __importDefault(require("colors"));
-const user_model_1 = require("./user.model");
-const unlinkFile_1 = __importDefault(require("../../../shared/unlinkFile"));
-const logger_1 = require("../../../shared/logger");
+const jwtHelper_1 = require("../../../helpers/jwtHelper");
 const config_1 = __importDefault(require("../../../config"));
-const createUserIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
-    const existingUser = yield user_model_1.User.findOne({ email: payload.email });
-    if (existingUser) {
-        throw new ApiError_1.default(http_status_codes_1.StatusCodes.CONFLICT, 'An account with this email already exists. Please use a different email address.');
+const common_1 = require("../../../enums/common");
+const user_model_1 = require("./user.model");
+const googleapis_1 = require("googleapis");
+const axios_1 = __importDefault(require("axios"));
+const encryptionHelper_1 = require("../../../helpers/encryptionHelper");
+// OAuth2 client setup
+const oauth2Client = new googleapis_1.google.auth.OAuth2(config_1.default.oauth.google.client_id, config_1.default.oauth.google.client_secret, config_1.default.oauth.google.redirect_uri);
+const refreshGoogleToken = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId).select('+refreshToken');
+    if (!user || !user.refreshToken) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.UNAUTHORIZED, 'No refresh token available');
     }
     try {
-        const session = yield mongoose_1.default.startSession();
-        let result;
-        yield session.withTransaction(() => __awaiter(void 0, void 0, void 0, function* () {
-            if (!payload.role)
-                payload.role = user_1.USER_ROLES.USER;
-            if (!payload.password)
-                payload.password = config_1.default.admin.password;
-            result = yield user_model_1.User.create([payload], { session });
-            result = result[0];
-            if (!result) {
-                throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'Failed to create user account. Please try again.');
+        const decryptedToken = encryptionHelper_1.encryptionHelper.decrypt(user.refreshToken);
+        oauth2Client.setCredentials({ refresh_token: decryptedToken });
+        const { credentials } = yield oauth2Client.refreshAccessToken();
+        user.googleAccessToken = credentials.access_token
+            ? encryptionHelper_1.encryptionHelper.encrypt(credentials.access_token)
+            : undefined;
+        if (credentials.refresh_token) {
+            user.refreshToken = encryptionHelper_1.encryptionHelper.encrypt(credentials.refresh_token);
+        }
+        yield user.save();
+        return credentials.access_token;
+    }
+    catch (error) {
+        console.error('Token refresh error:', error);
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to refresh token');
+    }
+});
+const googleLoginIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    const { code } = payload;
+    try {
+        const { tokens } = yield oauth2Client.getToken(code);
+        oauth2Client.setCredentials(tokens);
+        const oauth2 = googleapis_1.google.oauth2({ auth: oauth2Client, version: 'v2' });
+        const { data } = yield oauth2.userinfo.get();
+        if (!data.email) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'Email not provided by Google');
+        }
+        // Check if user exists with this email
+        let user = yield user_model_1.User.isExistUserByEmail(data.email);
+        if (user) {
+            // Update existing user's Google credentials
+            user.googleId = (_a = data.id) !== null && _a !== void 0 ? _a : undefined;
+            user.googleAccessToken = tokens.access_token
+                ? encryptionHelper_1.encryptionHelper.encrypt(tokens.access_token)
+                : undefined;
+            if (tokens.refresh_token) {
+                user.refreshToken = tokens.refresh_token
+                    ? encryptionHelper_1.encryptionHelper.encrypt(tokens.refresh_token)
+                    : undefined;
             }
-            console.log('User created successfully::', result);
-            // Generate and send OTP
-            const otp = (0, generateOTP_1.default)();
-            const emailValues = {
-                name: result.name,
-                otp,
-                email: result.email,
-            };
-            const accountEmailTemplate = emailTemplate_1.emailTemplate.createAccount(emailValues);
-            yield emailHelper_1.emailHelper.sendEmail(accountEmailTemplate);
-            // Update user authentication details
-            const authentication = {
-                oneTimeCode: otp,
-                expireAt: new Date(Date.now() + 3 * 60000),
-            };
-            const updatedUser = yield user_model_1.User.findOneAndUpdate({ _id: result._id }, {
-                $set: {
-                    authentication,
-                    status: 'pending',
-                    verified: false,
-                },
-            }, { new: true, session });
-            if (!updatedUser) {
-                throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to update user authentication details');
-            }
-        }));
-        yield session.endSession();
+            user.authProvider = common_1.AUTH_PROVIDER.GOOGLE;
+            user.lastSync = new Date(); // Update lastSync
+            yield user.save();
+        }
+        else {
+            // Create new user with encrypted tokens
+            user = yield user_model_1.User.create({
+                email: data.email,
+                name: data.name,
+                image: data.picture,
+                authProvider: common_1.AUTH_PROVIDER.GOOGLE,
+                googleId: data.id,
+                googleAccessToken: tokens.access_token
+                    ? encryptionHelper_1.encryptionHelper.encrypt(tokens.access_token)
+                    : undefined,
+                refreshToken: tokens.refresh_token
+                    ? encryptionHelper_1.encryptionHelper.encrypt(tokens.refresh_token)
+                    : undefined,
+                verified: true,
+                status: common_1.USER_STATUS.ACTIVE,
+                lastSync: new Date(),
+            });
+        }
+        // Generate JWT token
+        const accessToken = jwtHelper_1.jwtHelper.createToken({ userId: user._id }, config_1.default.jwt.secret, config_1.default.jwt.expire_in);
         return {
-            email: result.email,
-            status: 'success',
-            message: 'Registration successful. Please check your email for verification code.',
+            accessToken,
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                image: user.image,
+            },
         };
     }
     catch (error) {
-        if (error instanceof Error) {
-            const mongoError = error;
-            if (mongoError.code === 11000) {
-                throw new ApiError_1.default(http_status_codes_1.StatusCodes.CONFLICT, 'An account with this email already exists. Please use a different email address.');
-            }
+        console.error('Authentication error:', error);
+        if (axios_1.default.isAxiosError(error)) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${((_c = (_b = error.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.error) || error.message}`);
         }
-        logger_1.logger.error('User creation error:', error);
-        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to create user account. Please try again later.');
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 });
-// const setUserNewPassword = async (payload: SetPasswordPayload) => {
-//   const { email, password, address } = payload;
-//   const user = await User.findOne({ email });
-//   if (!user) {
-//     throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-//   }
-//   if (!user.verified) {
-//     throw new ApiError(
-//       StatusCodes.BAD_REQUEST,
-//       'Please verify your email first'
-//     );
-//   }
-//   const hashedPassword = await bcrypt.hash(
-//     password,
-//     Number(config.bcrypt_salt_rounds)
-//   );
-//   const session = await mongoose.startSession();
-//   let updatedUser;
-//   try {
-//     await session.withTransaction(async () => {
-//       // Update user with password and set status to active
-//       updatedUser = await User.findByIdAndUpdate(
-//         user._id,
-//         {
-//           password: hashedPassword,
-//           address,
-//           status: 'active',
-//         },
-//         { new: true, session }
-//       ).select('-password');
-//       if (!updatedUser) {
-//         throw new ApiError(
-//           StatusCodes.INTERNAL_SERVER_ERROR,
-//           'Failed to update user'
-//         );
-//       }
-//       // Send admin notifications since the user registration is now complete
-//       const adminUsers = await User.find({ role: USER_ROLES.ADMIN }).select(
-//         '_id'
-//       );
-//       // Create notifications for each admin
-//       const notificationPromises = adminUsers.map(admin => {
-//         const notificationData: Partial<INotification> = {
-//           message: `New ${user.role.toLowerCase()}, Name: ${
-//             user.name
-//           }, Email: (${user.email}) has completed registration.`,
-//           type: 'ADMIN',
-//           receiver: admin._id,
-//           metadata: {
-//             userId: user._id,
-//             userEmail: user.email,
-//             userName: user.name,
-//             userRole: user.role,
-//             action: `new_${user.role.toLowerCase()}_registration_completed`,
-//           },
-//         };
-//         return sendNotifications(notificationData); // send notification using socketIO or other notification system
-//         // return NotificationService.createNotification(notificationData);
-//       });
-//       await Promise.all(notificationPromises);
-//     });
-//     await session.endSession();
-//     // Generate access token after successful password set
-//     const accessToken = jwtHelper.createToken(
-//       {
-//         id: user._id,
-//         role: user.role,
-//         email: user.email,
-//         name: user.name,
-//       },
-//       config.jwt.jwt_secret as Secret,
-//       config.jwt.jwt_expire_in as string
-//     );
-//     return {
-//       accessToken,
-//       data: updatedUser,
-//     };
-//   } catch (error) {
-//     await session.endSession();
-//     logger.error('Set password error:', error);
-//     throw new ApiError(
-//       StatusCodes.INTERNAL_SERVER_ERROR,
-//       'Failed to set password. Please try again later.'
-//     );
-//   }
-// };
-const getAllUsers = (query) => __awaiter(void 0, void 0, void 0, function* () {
-    const { searchTerm, page = 1, limit = 10, sortBy = 'createdAt', order = 'desc' } = query, filterData = __rest(query, ["searchTerm", "page", "limit", "sortBy", "order"]);
-    // Search conditions
-    const conditions = [];
-    if (searchTerm) {
-        const cleanedSearchTerm = searchTerm.toString().replace(/[+\s-]/g, '');
-        conditions.push({
-            $or: [
-                { name: { $regex: searchTerm, $options: 'i' } },
-                { email: { $regex: searchTerm, $options: 'i' } },
-                {
-                    phone: {
-                        $regex: cleanedSearchTerm,
-                        $options: 'i',
-                    },
-                },
-            ],
-        });
+const refreshMicrosoftToken = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId).select('+refreshToken');
+    if (!user || !user.refreshToken) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.UNAUTHORIZED, 'No refresh token available');
     }
-    // Add filter conditions
-    if (Object.keys(filterData).length > 0) {
-        const filterConditions = Object.entries(filterData).map(([field, value]) => ({
-            [field]: value,
-        }));
-        conditions.push({ $and: filterConditions });
-    }
-    const whereConditions = conditions.length ? { $and: conditions } : {};
-    // Pagination setup
-    const currentPage = Number(page);
-    const pageSize = Number(limit);
-    const skip = (currentPage - 1) * pageSize;
-    // Sorting setup
-    const sortOrder = order === 'desc' ? -1 : 1;
-    const sortCondition = {
-        [sortBy]: sortOrder,
-    };
-    // Query the database
-    const [users, total, genderStats] = yield Promise.all([
-        user_model_1.User.find(whereConditions)
-            .sort(sortCondition)
-            .skip(skip)
-            .limit(pageSize)
-            .lean(),
-        user_model_1.User.countDocuments(whereConditions),
-        user_model_1.User.aggregate([
-            {
-                $group: {
-                    _id: '$gender',
-                    count: { $sum: 1 },
-                },
+    try {
+        const decryptedToken = encryptionHelper_1.encryptionHelper.decrypt(user.refreshToken);
+        // Request new access token using refresh token
+        const tokenResponse = yield axios_1.default.post('https://login.microsoftonline.com/common/oauth2/v2.0/token', new URLSearchParams({
+            client_id: config_1.default.oauth.microsoft.client_id,
+            client_secret: config_1.default.oauth.microsoft.client_secret,
+            refresh_token: decryptedToken,
+            grant_type: 'refresh_token',
+        }).toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
-        ]),
-    ]);
-    // Calculate gender ratios
-    const totalUsers = genderStats.reduce((acc, curr) => acc + curr.count, 0);
-    const genderRatio = genderStats.reduce((acc, { _id, count }) => {
-        if (_id) {
-            acc[_id] = {
-                count,
-                percentage: ((count / totalUsers) * 100).toFixed(2) + '%',
-            };
+        });
+        // Update tokens in database
+        user.microsoftAccessToken = tokenResponse.data.access_token
+            ? encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token)
+            : undefined;
+        if (tokenResponse.data.refresh_token) {
+            user.refreshToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token);
+        }
+        user.lastSync = new Date();
+        yield user.save();
+        return tokenResponse.data.access_token;
+    }
+    catch (error) {
+        console.error('Microsoft token refresh error:', error);
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to refresh Microsoft token');
+    }
+});
+const refreshYahooToken = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId).select('+refreshToken');
+    if (!user || !user.refreshToken) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.UNAUTHORIZED, 'No refresh token available');
+    }
+    try {
+        const decryptedToken = encryptionHelper_1.encryptionHelper.decrypt(user.refreshToken);
+        // Request new access token using refresh token
+        const tokenResponse = yield axios_1.default.post('https://api.login.yahoo.com/oauth2/get_token', new URLSearchParams({
+            client_id: config_1.default.oauth.yahoo.client_id,
+            client_secret: config_1.default.oauth.yahoo.client_secret,
+            refresh_token: decryptedToken,
+            grant_type: 'refresh_token',
+        }).toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
+        // Update tokens in database
+        user.yahooAccessToken = tokenResponse.data.access_token
+            ? encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token)
+            : undefined;
+        if (tokenResponse.data.refresh_token) {
+            user.refreshToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token);
+        }
+        user.lastSync = new Date();
+        yield user.save();
+        return tokenResponse.data.access_token;
+    }
+    catch (error) {
+        console.error('Yahoo token refresh error:', error);
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Failed to refresh Yahoo token');
+    }
+});
+const microsoftLoginIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const { code } = payload;
+    try {
+        // Exchange code for tokens
+        const tokenResponse = yield axios_1.default.post('https://login.microsoftonline.com/common/oauth2/v2.0/token', new URLSearchParams({
+            client_id: config_1.default.oauth.microsoft.client_id,
+            client_secret: config_1.default.oauth.microsoft.client_secret,
+            code,
+            redirect_uri: config_1.default.oauth.microsoft.redirect_uri,
+            grant_type: 'authorization_code',
+        }).toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
+        // Get user info from Microsoft Graph API
+        const userResponse = yield axios_1.default.get('https://graph.microsoft.com/v1.0/me', {
+            headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
+        });
+        const { id, mail, displayName } = userResponse.data;
+        if (!mail) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'Email not provided by Microsoft');
+        }
+        // Check if user exists
+        let user = yield user_model_1.User.isExistUserByEmail(mail);
+        if (user) {
+            // Update existing user's Microsoft credentials
+            user.microsoftId = id;
+            user.microsoftAccessToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token);
+            if (tokenResponse.data.refresh_token) {
+                user.refreshToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token);
+            }
+            user.authProvider = common_1.AUTH_PROVIDER.MICROSOFT;
+            user.lastSync = new Date();
+            yield user.save();
+        }
+        else {
+            // Create new user with encrypted tokens
+            user = yield user_model_1.User.create({
+                email: mail,
+                name: displayName,
+                authProvider: common_1.AUTH_PROVIDER.MICROSOFT,
+                microsoftId: id,
+                microsoftAccessToken: encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token),
+                refreshToken: tokenResponse.data.refresh_token
+                    ? encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token)
+                    : undefined,
+                verified: true,
+                status: common_1.USER_STATUS.ACTIVE,
+                lastSync: new Date(),
+            });
+        }
+        // Generate JWT token
+        const accessToken = jwtHelper_1.jwtHelper.createToken({ userId: user._id }, config_1.default.jwt.secret, config_1.default.jwt.expire_in);
+        return {
+            accessToken,
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                image: user.image,
+            },
+        };
+    }
+    catch (error) {
+        console.error('Authentication error:', error);
+        if (axios_1.default.isAxiosError(error)) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${((_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.error) || error.message}`);
+        }
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+});
+const yahooLoginIntoDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    const { code } = payload;
+    try {
+        // Exchange code for tokens
+        const tokenResponse = yield axios_1.default.post('https://api.login.yahoo.com/oauth2/get_token', new URLSearchParams({
+            client_id: config_1.default.oauth.yahoo.client_id,
+            client_secret: config_1.default.oauth.yahoo.client_secret,
+            code,
+            redirect_uri: config_1.default.oauth.yahoo.redirect_uri,
+            grant_type: 'authorization_code',
+        }).toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        });
+        // Get user info
+        const userResponse = yield axios_1.default.get('https://api.login.yahoo.com/openid/v1/userinfo', {
+            headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
+        });
+        const { sub, email, name } = userResponse.data;
+        if (!email) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'Email not provided by Yahoo');
+        }
+        // Check if user exists
+        let user = yield user_model_1.User.isExistUserByEmail(email);
+        if (user) {
+            // Update existing user's Yahoo credentials
+            user.yahooId = sub;
+            user.yahooAccessToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token);
+            if (tokenResponse.data.refresh_token) {
+                user.refreshToken = encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token);
+            }
+            user.authProvider = common_1.AUTH_PROVIDER.YAHOO;
+            user.lastSync = new Date();
+            yield user.save();
+        }
+        else {
+            // Create new user with encrypted tokens
+            user = yield user_model_1.User.create({
+                email,
+                name,
+                authProvider: common_1.AUTH_PROVIDER.YAHOO,
+                yahooId: sub,
+                yahooAccessToken: encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.access_token),
+                refreshToken: tokenResponse.data.refresh_token
+                    ? encryptionHelper_1.encryptionHelper.encrypt(tokenResponse.data.refresh_token)
+                    : undefined,
+                verified: true,
+                status: common_1.USER_STATUS.ACTIVE,
+                lastSync: new Date(),
+            });
+        }
+        // Generate JWT token
+        const accessToken = jwtHelper_1.jwtHelper.createToken({ userId: user._id }, config_1.default.jwt.secret, config_1.default.jwt.expire_in);
+        return {
+            accessToken,
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                image: user.image,
+            },
+        };
+    }
+    catch (error) {
+        console.error('Authentication error:', error);
+        if (axios_1.default.isAxiosError(error)) {
+            throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${((_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.error) || error.message}`);
+        }
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, `Failed to authenticate with provider: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+});
+const updateProfile = (userId, profileData) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId);
+    if (!user) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'User not found');
+    }
+    // Only allow updating specific fields
+    const allowedUpdates = [
+        'name',
+        'phone',
+        'address',
+        'country',
+        'gender',
+        'dateOfBirth',
+    ];
+    // Filter out any fields that aren't in allowedUpdates
+    const filteredData = Object.keys(profileData).reduce((acc, key) => {
+        if (allowedUpdates.includes(key)) {
+            // Type assertion to handle the index signature issue
+            acc[key] = profileData[key];
         }
         return acc;
     }, {});
-    // Format the updatedAt field
-    const formattedUsers = users === null || users === void 0 ? void 0 : users.map(user => (Object.assign(Object.assign({}, user), { updatedAt: user.updatedAt
-            ? new Date(user.updatedAt).toISOString().split('T')[0]
-            : null })));
-    // Meta information for pagination and gender stats
-    return {
-        meta: {
-            total,
-            limit: pageSize,
-            totalPages: Math.ceil(total / pageSize),
-            currentPage,
-            genderRatio,
-        },
-        result: formattedUsers,
-    };
+    // Update user with filtered data
+    Object.assign(user, filteredData);
+    // Update lastSync timestamp
+    user.lastSync = new Date();
+    yield user.save();
+    return user;
 });
-const getUserProfileFromDB = (user) => __awaiter(void 0, void 0, void 0, function* () {
-    const { id } = user;
-    const isExistUser = yield user_model_1.User.findById(id);
-    if (!isExistUser) {
-        throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, "User doesn't exist!");
+const logout = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId);
+    if (!user) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'User not found');
     }
-    return isExistUser;
+    // Clear OAuth tokens
+    user.googleAccessToken = undefined;
+    user.microsoftAccessToken = undefined;
+    user.yahooAccessToken = undefined;
+    user.refreshToken = undefined;
+    user.lastSync = new Date();
+    yield user.save();
+    return null;
 });
-const updateProfileToDB = (user, payload) => __awaiter(void 0, void 0, void 0, function* () {
-    const { id } = user;
-    const isExistUser = yield user_model_1.User.isExistUserById(id);
-    if (!isExistUser) {
-        throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, "User doesn't exist!");
+const getCurrentUser = (userId) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId).select('-password');
+    if (!user) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'User not found');
     }
-    // Check if email or phone is being updated
-    const needsVerification = payload.email || payload.phone;
-    if (needsVerification) {
-        // Check if new email already exists
-        if (payload.email) {
-            const emailExists = yield user_model_1.User.findOne({
-                email: payload.email,
-                _id: { $ne: id }, // Exclude current user
-            });
-            if (emailExists) {
-                throw new ApiError_1.default(http_status_codes_1.StatusCodes.CONFLICT, 'Email already exists. Please use a different email address.');
-            }
-        }
-        // Check if new phone already exists
-        if (payload.phone) {
-            const phoneExists = yield user_model_1.User.findOne({
-                phone: payload.phone,
-                _id: { $ne: id }, // Exclude current user
-            });
-            if (phoneExists) {
-                throw new ApiError_1.default(http_status_codes_1.StatusCodes.CONFLICT, 'Phone number already exists. Please use a different number.');
-            }
-        }
-        // Generate OTP for verification
-        const otp = (0, generateOTP_1.default)();
-        const authentication = {
-            oneTimeCode: otp,
-            expireAt: new Date(Date.now() + 3 * 60000), // 3 minutes
-            isResetPassword: false,
+    return user;
+});
+// In updateSubscription method
+const updateSubscription = (userId, subscriptionData) => __awaiter(void 0, void 0, void 0, function* () {
+    const user = yield user_model_1.User.findById(userId);
+    if (!user) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'User not found');
+    }
+    // If plan is changing, update end date accordingly
+    if (subscriptionData.plan &&
+        subscriptionData.plan !== user.subscription.plan) {
+        // Calculate new end date based on plan with type-safe index
+        const endDateMap = {
+            FREE: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+            BASIC: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+            PRO: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+            ENTERPRISE: new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000), // 2 years
         };
-        // Store the pending changes and authentication data
-        const pendingChanges = Object.assign(Object.assign(Object.assign({}, (payload.email && { email: payload.email })), (payload.phone && { phone: payload.phone })), { authentication, verified: false, status: 'pending' });
-        // Send OTP to new email if email is being updated
-        if (payload.email) {
-            const emailValues = {
-                name: isExistUser.name,
-                otp,
-                email: payload.email,
-            };
-            const verificationEmailTemplate = emailTemplate_1.emailTemplate.createAccount(emailValues);
-            yield emailHelper_1.emailHelper.sendEmail(verificationEmailTemplate);
-        }
-        // Update user with pending changes
-        yield user_model_1.User.findOneAndUpdate({ _id: id }, pendingChanges, { new: true });
-        return {
-            verificationRequired: true,
-            message: 'Please verify your new contact information with the OTP sent to your email.',
-        };
+        subscriptionData.startDate = new Date();
+        subscriptionData.endDate =
+            endDateMap[subscriptionData.plan];
+        subscriptionData.status = 'ACTIVE';
     }
-    // Handle image update
-    if (payload.image && isExistUser.image) {
-        (0, unlinkFile_1.default)(isExistUser.image);
-    }
-    // Process normal update without verification
-    const updateDoc = yield user_model_1.User.findOneAndUpdate({ _id: id }, payload, {
-        new: true,
-    });
-    return updateDoc;
-});
-const getSingleUser = (id) => __awaiter(void 0, void 0, void 0, function* () {
-    const result = yield user_model_1.User.findById(id);
-    return result;
-});
-const getOnlineUsers = () => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const onlineUsers = yield user_model_1.User.find({
-            onlineStatus: true,
-            // lastActiveAt: {
-            //   $gte: new Date(Date.now() - 5 * 60 * 1000),
-            // },
-        }).select('name email profileImage');
-        logger_1.logger.info(colors_1.default.green(`[UserService] Retrieved ${onlineUsers.length} online users`));
-        return onlineUsers;
-    }
-    catch (error) {
-        logger_1.logger.error(colors_1.default.red('[UserService] Error retrieving online users:'), error);
-        throw error;
-    }
-});
-const updateUserOnlineStatus = (userId, isOnline) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const user = yield user_model_1.User.findByIdAndUpdate(userId, {
-            onlineStatus: isOnline,
-            lastActiveAt: new Date(),
-        }, { new: true });
-        if (!user) {
-            throw new Error('User not found');
-        }
-        logger_1.logger.info(colors_1.default.green(`[UserService] User ${userId} online status updated to ${isOnline}`));
-        return user;
-    }
-    catch (error) {
-        logger_1.logger.error(colors_1.default.red(`[UserService] Error updating user ${userId} online status:`), error);
-        throw error;
-    }
+    user.subscription = Object.assign(Object.assign({}, user.subscription), subscriptionData);
+    user.lastSync = new Date();
+    yield user.save();
+    return user;
 });
 exports.UserService = {
-    createUserIntoDB,
-    // setUserNewPassword,
-    getUserProfileFromDB,
-    updateProfileToDB,
-    getAllUsers,
-    getSingleUser,
-    getOnlineUsers,
-    updateUserOnlineStatus,
+    googleLoginIntoDB,
+    microsoftLoginIntoDB,
+    yahooLoginIntoDB,
+    refreshGoogleToken,
+    refreshMicrosoftToken,
+    refreshYahooToken,
+    updateProfile,
+    logout,
+    getCurrentUser,
+    updateSubscription,
 };

@@ -2,14 +2,23 @@ import { Document, Model } from 'mongoose';
 import {
   AUTH_PROVIDER,
   USER_GENDER,
+  USER_PLAN,
   USER_ROLES,
   USER_STATUS,
 } from '../../../enums/common';
 
 export type IUserSubscription = {
-  plan: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  // plan: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  plan: USER_PLAN;
   startDate: Date;
   endDate: Date;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+
+  // Usage limits tracking
+  dailyRequests: number;
+  dailyTokens: number;
+  lastRequestDate?: Date;
   status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
   autoRenew: boolean;
 };

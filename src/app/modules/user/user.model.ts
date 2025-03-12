@@ -27,6 +27,23 @@ const userSubscriptionSchema = new Schema({
     enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
     default: 'ACTIVE',
   },
+  stripeCustomerId: {
+    type: String,
+  },
+  stripeSubscriptionId: {
+    type: String,
+  },
+  dailyRequests: {
+    type: Number,
+    default: 0,
+  },
+  dailyTokens: {
+    type: Number,
+    default: 0,
+  },
+  lastRequestDate: {
+    type: Date,
+  },
   autoRenew: {
     type: Boolean,
     default: true,

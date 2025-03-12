@@ -17,41 +17,70 @@ const http_status_codes_1 = require("http-status-codes");
 const catchAsync_1 = __importDefault(require("../../../shared/catchAsync"));
 const sendResponse_1 = __importDefault(require("../../../shared/sendResponse"));
 const user_service_1 = require("./user.service");
-const logger_1 = require("../../../shared/logger");
-const createUser = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+const googleLogin = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const value = Object.assign({}, req.body);
-        const result = yield user_service_1.UserService.createUserIntoDB(value);
+        const result = yield user_service_1.UserService.googleLoginIntoDB(req.body);
+        // Set JWT token in HTTP-only cookie
+        res.cookie('token', result.accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
         (0, sendResponse_1.default)(res, {
             success: true,
             statusCode: http_status_codes_1.StatusCodes.OK,
-            message: 'Please check your email to verify your account. We have sent you an OTP to complete the registration process.',
-            data: result.email,
+            message: 'Login successful using Google authentication',
+            data: result.user,
         });
     }
     catch (error) {
-        if (error instanceof Error) {
-            next(error);
-        }
-        else {
-            next(new Error('An unknown error occurred'));
-        }
+        next(error);
     }
 }));
-const getUserProfile = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const user = req.user;
-    const result = yield user_service_1.UserService.getUserProfileFromDB(user);
-    (0, sendResponse_1.default)(res, {
-        success: true,
-        statusCode: http_status_codes_1.StatusCodes.OK,
-        message: 'Profile data retrieved successfully',
-        data: result,
-    });
+const microsoftLogin = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const result = yield user_service_1.UserService.microsoftLoginIntoDB(req.body);
+        res.cookie('token', result.accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        (0, sendResponse_1.default)(res, {
+            success: true,
+            statusCode: http_status_codes_1.StatusCodes.OK,
+            message: 'Login successful using Microsoft authentication',
+            data: result.user,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
 }));
-const updateProfile = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    const user = req.user;
-    const updateData = req.body;
-    const result = yield user_service_1.UserService.updateProfileToDB(user, updateData);
+const yahooLogin = (0, catchAsync_1.default)((req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const result = yield user_service_1.UserService.yahooLoginIntoDB(req.body);
+        res.cookie('token', result.accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        (0, sendResponse_1.default)(res, {
+            success: true,
+            statusCode: http_status_codes_1.StatusCodes.OK,
+            message: 'Login successful using Yahoo authentication',
+            data: result.user,
+        });
+    }
+    catch (error) {
+        next(error);
+    }
+}));
+const updateProfile = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const result = yield user_service_1.UserService.updateProfile((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId, req.body);
     (0, sendResponse_1.default)(res, {
         success: true,
         statusCode: http_status_codes_1.StatusCodes.OK,
@@ -59,57 +88,43 @@ const updateProfile = (0, catchAsync_1.default)((req, res, next) => __awaiter(vo
         data: result,
     });
 }));
-const getAllUser = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const result = yield user_service_1.UserService.getAllUsers(req.query);
+const logout = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    yield user_service_1.UserService.logout((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId);
+    res.clearCookie('token');
+    (0, sendResponse_1.default)(res, {
+        success: true,
+        statusCode: http_status_codes_1.StatusCodes.OK,
+        message: 'Logged out successfully',
+        data: null,
+    });
+}));
+const getCurrentUser = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const user = yield user_service_1.UserService.getCurrentUser((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId);
     (0, sendResponse_1.default)(res, {
         success: true,
         statusCode: http_status_codes_1.StatusCodes.OK,
         message: 'User retrieved successfully',
+        data: user,
+    });
+}));
+const updateSubscription = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const result = yield user_service_1.UserService.updateSubscription((_a = req.user) === null || _a === void 0 ? void 0 : _a.userId, req.body);
+    (0, sendResponse_1.default)(res, {
+        success: true,
+        statusCode: http_status_codes_1.StatusCodes.OK,
+        message: 'Subscription updated successfully',
         data: result,
-    });
-}));
-const getSingleUser = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const result = yield user_service_1.UserService.getSingleUser(req.params.id);
-    (0, sendResponse_1.default)(res, {
-        success: true,
-        statusCode: http_status_codes_1.StatusCodes.OK,
-        message: 'User retrieved successfully',
-        data: result,
-    });
-}));
-const getOnlineUsers = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const onlineUsers = yield user_service_1.UserService.getOnlineUsers();
-    (0, sendResponse_1.default)(res, {
-        success: true,
-        statusCode: http_status_codes_1.StatusCodes.OK,
-        message: `Online users retrieved successfully. Total: ${onlineUsers.length}`,
-        data: onlineUsers,
-    });
-}));
-const updateOnlineStatus = (0, catchAsync_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { userId, status } = req.body;
-    if (!userId || typeof status !== 'boolean') {
-        return (0, sendResponse_1.default)(res, {
-            success: false,
-            statusCode: http_status_codes_1.StatusCodes.BAD_REQUEST,
-            message: 'Invalid userId or status. Please provide valid inputs.',
-        });
-    }
-    logger_1.logger.info(`Controller: Updating user ${userId} online status to ${status}`);
-    const updatedUser = yield user_service_1.UserService.updateUserOnlineStatus(userId, status);
-    (0, sendResponse_1.default)(res, {
-        success: true,
-        statusCode: http_status_codes_1.StatusCodes.OK,
-        message: `User online status updated successfully to ${status ? 'online' : 'offline'}`,
-        data: updatedUser,
     });
 }));
 exports.UserController = {
-    createUser,
-    getUserProfile,
+    googleLogin,
+    microsoftLogin,
+    yahooLogin,
     updateProfile,
-    getAllUser,
-    getSingleUser,
-    getOnlineUsers,
-    updateOnlineStatus,
+    logout,
+    getCurrentUser,
+    updateSubscription,
 };

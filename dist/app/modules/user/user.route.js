@@ -1,41 +1,25 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserRoutes = void 0;
+// src\app\modules\user\user.route.ts
 const express_1 = __importDefault(require("express"));
+const user_controller_1 = require("./user.controller");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const user_validation_1 = require("./user.validation");
+const rateLimit_middleware_1 = require("../../middlewares/rateLimit.middleware");
 const router = express_1.default.Router();
-/**
- * User Management Routes
- * ===========================================
- * Handles all user-related operations including:
- * - User registration
- * - Profile management
- * - Admin user management
- * - Online status tracking
- */
-/**
- * User Registration
- * -------------------------------------------
- * Public routes for user registration and setup
- */
-/**
- * @route   POST /users/create-user
- * @desc    Register a new user with profile image
- * @access  Public
- * @rateLimit 5 attempts per 10 minutes
- */
-router.post('/create-user', (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    res.send('<h1 style="text-align:center; color:#A55FEF; font-family:Verdana;">Hey Frontend Developer, How can I assist you today!</h1>');
-}));
+// OAuth routes
+router.post('/auth/google', rateLimit_middleware_1.authLimiter, (0, validateRequest_1.default)(user_validation_1.UserValidation.oauthLoginSchema), user_controller_1.UserController.googleLogin);
+router.post('/auth/microsoft', rateLimit_middleware_1.authLimiter, (0, validateRequest_1.default)(user_validation_1.UserValidation.oauthLoginSchema), user_controller_1.UserController.microsoftLogin);
+router.post('/auth/yahoo', rateLimit_middleware_1.authLimiter, (0, validateRequest_1.default)(user_validation_1.UserValidation.oauthLoginSchema), user_controller_1.UserController.yahooLogin);
+// User management routes
+router.get('/me', (0, auth_1.default)(), rateLimit_middleware_1.apiLimiter, user_controller_1.UserController.getCurrentUser);
+router.patch('/profile', (0, auth_1.default)(), rateLimit_middleware_1.apiLimiter, (0, validateRequest_1.default)(user_validation_1.UserValidation.updateProfileSchema), user_controller_1.UserController.updateProfile);
+router.post('/logout', (0, auth_1.default)(), rateLimit_middleware_1.apiLimiter, user_controller_1.UserController.logout);
+// Subscription management
+router.patch('/subscription', (0, auth_1.default)(), rateLimit_middleware_1.apiLimiter, (0, validateRequest_1.default)(user_validation_1.UserValidation.updateSubscriptionSchema), user_controller_1.UserController.updateSubscription);
 exports.UserRoutes = router;

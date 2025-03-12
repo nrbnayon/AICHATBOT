@@ -23,11 +23,12 @@ const validateRequest = (schema) => {
         }
         catch (error) {
             if (error instanceof zod_1.ZodError) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Validation Error',
                     errors: error.errors,
                 });
+                return;
             }
             next(error);
         }

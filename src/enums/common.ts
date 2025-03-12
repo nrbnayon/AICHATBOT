@@ -7,6 +7,7 @@ export enum AUTH_PROVIDER {
   GOOGLE = 'google', // gmail
   MICROSOFT = 'microsoft', // outlook
   YAHOO = 'yahoo', // yahoo
+  LOCAL = 'local', // Local email/password login
 }
 
 export enum USER_STATUS {
@@ -23,4 +24,11 @@ export enum USER_GENDER {
   FEMALE = 'female',
   BOTH = 'both',
   OTHERS = 'others',
+}
+
+export enum USER_PLAN {
+  FREE = 'free',
+  BASIC = 'basic',
+  PREMIUM = 'premium',
+  ENTERPRISE = 'enterprise',
 }

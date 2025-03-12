@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ResetToken = void 0;
+// src\app\modules\resetToken\resetToken.model.ts
 const mongoose_1 = require("mongoose");
 const resetTokenSchema = new mongoose_1.Schema({
     user: {

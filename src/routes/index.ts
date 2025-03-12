@@ -3,7 +3,7 @@ import { UserRoutes } from '../app/modules/user/user.route';
 
 const router = express.Router();
 
-const apiRoutes = [{ path: '/user', route: UserRoutes }];
+const apiRoutes = [{ path: '/users', route: UserRoutes }];
 
 apiRoutes.forEach(route => router.use(route.path, route.route));
 

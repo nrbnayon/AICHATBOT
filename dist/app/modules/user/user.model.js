@@ -8,31 +8,61 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.User = void 0;
 // src\app\modules\user\user.model.ts
-const bcrypt_1 = __importDefault(require("bcrypt"));
-const http_status_codes_1 = require("http-status-codes");
 const mongoose_1 = require("mongoose");
-const config_1 = __importDefault(require("../../../config"));
-const user_1 = require("../../../enums/user");
-const ApiError_1 = __importDefault(require("../../../errors/ApiError"));
-const locationSchema = new mongoose_1.Schema({
-    locationName: { type: String },
-    latitude: { type: Number },
-    longitude: { type: Number },
+const common_1 = require("../../../enums/common");
+const userSubscriptionSchema = new mongoose_1.Schema({
+    plan: {
+        type: String,
+        enum: ['FREE', 'BASIC', 'PRO', 'ENTERPRISE'],
+        default: 'FREE',
+    },
+    startDate: {
+        type: Date,
+        default: Date.now,
+    },
+    endDate: {
+        type: Date,
+        default: () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
+    },
+    status: {
+        type: String,
+        enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
+        default: 'ACTIVE',
+    },
+    stripeCustomerId: {
+        type: String,
+    },
+    stripeSubscriptionId: {
+        type: String,
+    },
+    dailyRequests: {
+        type: Number,
+        default: 0,
+    },
+    dailyTokens: {
+        type: Number,
+        default: 0,
+    },
+    lastRequestDate: {
+        type: Date,
+    },
+    autoRenew: {
+        type: Boolean,
+        default: true,
+    },
 });
 const userSchema = new mongoose_1.Schema({
-    name: {
-        type: String,
-        required: true,
-    },
     role: {
         type: String,
-        enum: Object.values(user_1.USER_ROLES),
+        enum: Object.values(common_1.USER_ROLES),
+        default: common_1.USER_ROLES.USER,
+        required: true,
+    },
+    name: {
+        type: String,
         required: true,
     },
     email: {
@@ -41,65 +71,89 @@ const userSchema = new mongoose_1.Schema({
         unique: true,
         lowercase: true,
     },
+    authProvider: {
+        type: String,
+        enum: Object.values(common_1.AUTH_PROVIDER),
+        required: true,
+    },
+    image: String,
+    phone: String,
     password: {
         type: String,
         select: 0,
-        minlength: 8,
     },
-    phone: {
+    address: String,
+    // OAuth fields
+    googleId: {
         type: String,
+        sparse: true,
     },
-    postCode: {
+    microsoftId: {
         type: String,
+        sparse: true,
     },
-    address: { type: locationSchema },
-    country: {
+    yahooId: {
         type: String,
-        default: '',
+        sparse: true,
     },
+    googleAccessToken: {
+        type: String,
+        select: 0,
+    },
+    microsoftAccessToken: {
+        type: String,
+        select: 0,
+    },
+    yahooAccessToken: {
+        type: String,
+        select: 0,
+    },
+    refreshToken: {
+        type: String,
+        select: 0,
+    },
+    country: String,
     status: {
         type: String,
-        enum: [
-            'active',
-            'deactivate',
-            'delete',
-            'block',
-            'pending',
-            'inactive',
-            'approved',
-        ],
-        default: 'active',
-    },
-    gender: {
-        type: String,
-        enum: ['male', 'female', 'both'],
-    },
-    dateOfBirth: {
-        type: Date,
+        enum: Object.values(common_1.USER_STATUS),
+        default: common_1.USER_STATUS.ACTIVE,
     },
     verified: {
         type: Boolean,
         default: false,
     },
-    image: {
+    gender: {
         type: String,
-        default: 'https://www.shutterstock.com/shutterstock/photos/1153673752/display_1500/stock-vector-profile-placeholder-image-gray-silhouette-no-photo-1153673752.jpg',
+        enum: Object.values(common_1.USER_GENDER),
     },
-    appId: {
-        type: String,
-    },
-    fcmToken: {
-        type: String,
-    },
-    onlineStatus: {
+    dateOfBirth: Date,
+    isActive: {
         type: Boolean,
-        default: false,
+        default: true,
     },
-    lastActiveAt: {
+    lastActiveAt: Date,
+    lastSync: {
         type: Date,
-        default: null,
+        default: Date.now,
     },
-}, { timestamps: true });
+    subscription: {
+        type: userSubscriptionSchema,
+        default: () => ({}),
+    },
+}, {
+    timestamps: true,
+    toJSON: {
+        virtuals: true,
+        transform: function (doc, ret) {
+            delete ret.password;
+            delete ret.googleAccessToken;
+            delete ret.microsoftAccessToken;
+            delete ret.yahooAccessToken;
+            delete ret.refreshToken;
+            return ret;
+        },
+    },
+});
 // Static methods
 userSchema.statics.isExistUserById = function (id) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -108,45 +162,24 @@ userSchema.statics.isExistUserById = function (id) {
 };
 userSchema.statics.isExistUserByEmail = function (email) {
     return __awaiter(this, void 0, void 0, function* () {
-        return yield this.findOne({ email });
+        return yield this.findOne({ email: email.toLowerCase() });
     });
 };
-userSchema.statics.isAccountCreated = function (id) {
+userSchema.statics.isExistUserByProvider = function (provider, providerId) {
     return __awaiter(this, void 0, void 0, function* () {
-        const isUserExist = yield this.findById(id);
-        return !!isUserExist;
-    });
-};
-userSchema.statics.isMatchPassword = function (password, hashPassword) {
-    return __awaiter(this, void 0, void 0, function* () {
-        return yield bcrypt_1.default.compare(password, hashPassword);
-    });
-};
-userSchema.statics.findByEmailWithPassword = function (email) {
-    return __awaiter(this, void 0, void 0, function* () {
-        return yield this.findOne({ email }).select('+password');
-    });
-};
-// Middleware
-userSchema.pre('save', function (next) {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (!this.isModified('password')) {
-            return next();
+        const query = {};
+        switch (provider) {
+            case common_1.AUTH_PROVIDER.GOOGLE:
+                query.googleId = providerId;
+                break;
+            case common_1.AUTH_PROVIDER.MICROSOFT:
+                query.microsoftId = providerId;
+                break;
+            case common_1.AUTH_PROVIDER.YAHOO:
+                query.yahooId = providerId;
+                break;
         }
-        const isExist = yield exports.User.findOne({ email: this.email });
-        if (isExist) {
-            throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'Email already exists!');
-        }
-        if (this.password) {
-            try {
-                const hashedPassword = yield bcrypt_1.default.hash(this.password, Number(config_1.default.security.bcrypt_salt_rounds));
-                this.password = hashedPassword;
-            }
-            catch (error) {
-                return next(new ApiError_1.default(http_status_codes_1.StatusCodes.INTERNAL_SERVER_ERROR, 'Error hashing password'));
-            }
-        }
-        next();
+        return yield this.findOne(query);
     });
-});
+};
 exports.User = (0, mongoose_1.model)('User', userSchema);
