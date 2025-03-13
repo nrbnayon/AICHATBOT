@@ -19,7 +19,7 @@ app.use(Morgan.errorHandler);
 // Enhanced CORS configuration
 app.use(
   cors({
-    origin: config.frontend.url, // Use config for consistency
+    origin: 'http://localhost:5173', // Use config for consistency
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -44,7 +44,7 @@ app.use(
     cookie: {
       secure: config.cookies.secure,
       httpOnly: config.cookies.httpOnly,
-      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict'
+      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict',
     }, // Use config for consistency
   })
 );
