@@ -43,7 +43,7 @@ export default {
     url:
       process.env.NODE_ENV === 'production'
         ? process.env.FRONTEND_LIVE_URL
-        : 'http://localhost:5173', // Updated to match Vite frontend
+        : process.env.FRONTEND_URL || 'http://localhost:5173',
   },
 
   cookies: {
