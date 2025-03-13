@@ -1,40 +1,74 @@
-// src\app\modules\user\user.route.ts
-import express from 'express';
 import { UserController } from './user.controller';
+import express from 'express';
 import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { UserValidation } from './user.validation';
+import { USER_ROLES } from '../../../enums/common';
+import passport from '../../../config/passport';
 import {
   apiLimiter,
   authLimiter,
 } from '../../middlewares/rateLimit.middleware';
-import { USER_ROLES } from '../../../enums/common';
+import config from '../../../config';
 
 const router = express.Router();
 
-// OAuth routes
+// OAuth Routes
+router.get(
+  '/google-login',
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: true,
+  })
+);
+
+router.get(
+  '/auth/google/callback',
+  passport.authenticate('google', {
+    failureRedirect: `${config.frontend.url}/login?error=Google authentication failed`,
+    session: true,
+  }),
+  UserController.googleCallback
+);
+
+router.get(
+  '/microsoft-login',
+  passport.authenticate('microsoft', {
+    scope: ['user.read', 'user.read.all', 'mail.read'],
+    session: true,
+  })
+);
+
+router.get(
+  '/auth/microsoft/callback',
+  passport.authenticate('microsoft', {
+    failureRedirect: `${config.frontend.url}/login?error=Microsoft authentication failed`,
+    session: true,
+  }),
+  UserController.microsoftCallback
+);
+
+// Yahoo OAuth
+router.get('/yahoo-login', UserController.yahooLogin);
+router.get('/auth/yahoo/callback', UserController.yahooCallback);
+
+// Local Authentication Routes
 router.post(
-  '/auth/google',
+  '/auth/login',
   authLimiter,
-  validateRequest(UserValidation.oauthLoginSchema),
-  UserController.googleLogin
+  validateRequest(UserValidation.loginZodSchema),
+  UserController.localLogin
 );
 
 router.post(
-  '/auth/microsoft',
-  authLimiter,
-  validateRequest(UserValidation.oauthLoginSchema),
-  UserController.microsoftLogin
+  '/auth/refresh-token',
+  validateRequest(UserValidation.refreshTokenZodSchema),
+  UserController.refreshToken
 );
 
-router.post(
-  '/auth/yahoo',
-  authLimiter,
-  validateRequest(UserValidation.oauthLoginSchema),
-  UserController.yahooLogin
-);
+router.post('/auth/logout', auth(), apiLimiter, UserController.logout);
 
-// User management routes
+// Protected Routes
 router.get(
   '/me',
   auth(USER_ROLES.USER, USER_ROLES.ADMIN),
@@ -50,9 +84,6 @@ router.patch(
   UserController.updateProfile
 );
 
-router.post('/logout', auth(), apiLimiter, UserController.logout);
-
-// Subscription management
 router.patch(
   '/subscription',
   auth(USER_ROLES.USER),

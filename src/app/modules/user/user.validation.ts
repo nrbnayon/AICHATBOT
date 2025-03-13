@@ -1,61 +1,56 @@
-// src\app\modules\user\user.validation.ts
 import { z } from 'zod';
-import {
-  USER_GENDER,
-} from '../../../enums/common';
+import { USER_GENDER, USER_PLAN } from '../../../enums/common';
 
-// Common validation rules
 const emailSchema = z
-  .string({
-    required_error: 'Email is required',
-  })
-  .email('Invalid email address')
-  .min(5, 'Email must be at least 5 characters')
-  .max(255, 'Email must not exceed 255 characters')
+  .string({ required_error: 'Email is required' })
+  .email()
+  .min(5)
+  .max(255)
   .transform(val => val.toLowerCase().trim());
 
+const passwordSchema = z
+  .string({ required_error: 'Password is required' })
+  .min(6)
+  .max(100);
+
 const nameSchema = z
-  .string({
-    required_error: 'Name is required',
-  })
-  .min(2, 'Name must be at least 2 characters')
-  .max(100, 'Name must not exceed 100 characters')
+  .string({ required_error: 'Name is required' })
+  .min(2)
+  .max(100)
   .trim();
 
 const phoneSchema = z
   .string()
-  .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
+  .regex(/^\+?[1-9]\d{1,14}$/)
   .optional();
 
-const addressSchema = z
-  .string()
-  .max(500, 'Address must not exceed 500 characters')
-  .optional();
-
-const countrySchema = z
-  .string()
-  .min(2, 'Country must be at least 2 characters')
-  .max(100, 'Country must not exceed 100 characters')
-  .optional();
-
+const addressSchema = z.string().max(500).optional();
+const countrySchema = z.string().min(2).max(100).optional();
 const dateSchema = z
   .string()
-  .refine(val => !isNaN(Date.parse(val)), {
-    message: 'Invalid date format (expected ISO 8601)',
-  })
+  .refine(val => !isNaN(Date.parse(val)), { message: 'Invalid date' })
   .transform(val => new Date(val))
   .optional();
 
-// OAuth login schema
 const oauthLoginSchema = z.object({
   body: z.object({
-    code: z.string({
-      required_error: 'Authorization code is required',
-    }),
+    code: z.string({ required_error: 'Authorization code is required' }),
   }),
 });
 
-// Update profile schema
+const loginZodSchema = z.object({
+  body: z.object({
+    email: emailSchema,
+    password: passwordSchema,
+  }),
+});
+
+const refreshTokenZodSchema = z.object({
+  body: z.object({
+    refreshToken: z.string({ required_error: 'Refresh token is required' }),
+  }),
+});
+
 const updateProfileSchema = z.object({
   body: z
     .object({
@@ -64,18 +59,17 @@ const updateProfileSchema = z.object({
       address: addressSchema,
       country: countrySchema,
       gender: z
-        .enum([...Object.values(USER_GENDER)] as [string, ...string[]])
+        .enum(Object.values(USER_GENDER) as [string, ...string[]])
         .optional(),
       dateOfBirth: dateSchema,
     })
     .strict(),
 });
 
-// Update subscription schema
 const updateSubscriptionSchema = z.object({
   body: z
     .object({
-      plan: z.enum(['FREE', 'BASIC', 'PRO', 'ENTERPRISE']),
+      plan: z.enum(Object.values(USER_PLAN) as [string, ...string[]]),
       autoRenew: z.boolean().optional(),
     })
     .strict(),
@@ -83,6 +77,8 @@ const updateSubscriptionSchema = z.object({
 
 export const UserValidation = {
   oauthLoginSchema,
+  loginZodSchema,
+  refreshTokenZodSchema,
   updateProfileSchema,
   updateSubscriptionSchema,
 };

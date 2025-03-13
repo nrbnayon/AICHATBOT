@@ -22,7 +22,7 @@ process.on('SIGTERM', () => {
   logger.info('SIGTERM IS RECEIVED');
 });
 
-// Connect to database (works in both serverless and development)
+// Connect to database
 let isConnected = false;
 
 const connectDB = async () => {
@@ -32,16 +32,20 @@ const connectDB = async () => {
   }
 
   try {
+    logger.info('Attempting to connect to MongoDB...');
     await mongoose.connect(config.database.mongodb_uri as string);
     isConnected = true;
     logger.info(colors.green('🚀 Database connected successfully'));
 
     // Only seed admin in development environment
     if (process.env.NODE_ENV !== 'production') {
-      seedAdmin();
+      logger.info('Seeding admin user...');
+      await seedAdmin();
+      logger.info('Admin seeding completed');
     }
   } catch (error) {
     errorLogger.error(colors.red('🤢 Failed to connect Database'), error);
+    process.exit(1);
   }
 };
 
@@ -54,7 +58,7 @@ if (process.env.NODE_ENV !== 'production') {
     typeof config.port === 'number' ? config.port : Number(config.port);
   app.listen(port, config.ip_address as string, () => {
     logger.info(
-      colors.yellow(`♻️   Application listening on port: ${config.port}`)
+      colors.yellow(`♻️ Application listening on port: ${config.port}`)
     );
   });
 }

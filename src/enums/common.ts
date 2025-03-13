@@ -1,3 +1,4 @@
+// src\enums\common.ts
 export enum USER_ROLES {
   ADMIN = 'ADMIN',
   USER = 'USER',
@@ -11,12 +12,13 @@ export enum AUTH_PROVIDER {
 }
 
 export enum USER_STATUS {
-  ACTIVE = 'active',
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  BLOCKED = 'BLOCKED',
   DEACTIVATE = 'deactivate',
   DELETE = 'delete',
   BLOCK = 'block',
   PENDING = 'pending',
-  INACTIVE = 'inactive',
   APPROVED = 'approved',
 }
 export enum USER_GENDER {

@@ -1,29 +1,34 @@
-// src\helpers\jwtHelper.ts
-import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
+// src/helpers/jwtHelper.ts
+import jwt, {  SignOptions } from 'jsonwebtoken';
 import config from '../config';
 import ApiError from '../errors/ApiError';
 import { StatusCodes } from 'http-status-codes';
 
+interface TokenPayload {
+  userId: string;
+  role: string;
+  email?: string;
+  name?: string;
+}
+
 const createToken = (
-  payload: object,
+  payload: TokenPayload,
   secret: string,
-  expireTime: string
+  expireTime: any
 ): string => {
-  const options: SignOptions = {
-    expiresIn: expireTime as SignOptions['expiresIn'],
-  };
+  const options: SignOptions = { expiresIn: expireTime };
   return jwt.sign(payload, secret, options);
 };
 
-const verifyToken = (token: string, secret: string): JwtPayload | null => {
+const verifyToken = <T extends object>(token: string, secret: string): T => {
   try {
-    return jwt.verify(token, secret) as JwtPayload;
+    return jwt.verify(token, secret) as T;
   } catch (error) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid token');
   }
 };
 
-const createAccessToken = (payload: object): string => {
+const createAccessToken = (payload: TokenPayload): string => {
   if (!config.jwt.secret) {
     throw new ApiError(
       StatusCodes.INTERNAL_SERVER_ERROR,
@@ -33,7 +38,7 @@ const createAccessToken = (payload: object): string => {
   return createToken(payload, config.jwt.secret, config.jwt.expire_in);
 };
 
-const createRefreshToken = (payload: object): string => {
+const createRefreshToken = (payload: TokenPayload): string => {
   if (!config.jwt.refresh_secret) {
     throw new ApiError(
       StatusCodes.INTERNAL_SERVER_ERROR,

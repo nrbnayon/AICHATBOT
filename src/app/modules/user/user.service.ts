@@ -1,364 +1,139 @@
-// src\app\modules\user\user.service.ts
+// src/app/modules/user/user.service.ts
 import { StatusCodes } from 'http-status-codes';
-import { JwtPayload } from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
+import axios from 'axios';
 import ApiError from '../../../errors/ApiError';
 import { jwtHelper } from '../../../helpers/jwtHelper';
-import config from '../../../config';
-import { AUTH_PROVIDER, USER_STATUS } from '../../../enums/common';
-import { IUser } from './user.interface';
-import { User } from './user.model';
-import { google } from 'googleapis';
-import axios from 'axios';
 import { encryptionHelper } from '../../../helpers/encryptionHelper';
+import config from '../../../config';
+import {
+  AUTH_PROVIDER,
+  USER_PLAN,
+  USER_ROLES,
+  USER_STATUS,
+} from '../../../enums/common';
+import { IOAuthLoginResponse, IUser } from './user.interface';
+import { User } from './user.model';
 
-// OAuth2 client setup
-const oauth2Client = new google.auth.OAuth2(
-  config.oauth.google.client_id,
-  config.oauth.google.client_secret,
-  config.oauth.google.redirect_uri
-);
+interface OAuthProfile {
+  id: string;
+  displayName: string;
+  emails?: Array<{ value: string }>;
+  _json?: { mail?: string; userPrincipalName?: string };
+  googleAccessToken?: string;
+  googleRefreshToken?: string;
+  microsoftAccessToken?: string;
+  microsoftRefreshToken?: string;
+}
 
-const refreshGoogleToken = async (userId: string) => {
-  const user = await User.findById(userId).select('+refreshToken');
-  if (!user || !user.refreshToken) {
-    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
+const handleOAuthCallback = async (
+  profile: OAuthProfile,
+  provider: AUTH_PROVIDER
+) => {
+  let user: IUser | null;
+  let email: string,
+    name: string,
+    providerId: string,
+    oauthAccessToken: string,
+    oauthRefreshToken: string | undefined;
+
+  switch (provider) {
+    case AUTH_PROVIDER.GOOGLE:
+      if (!profile.emails || !profile.emails[0])
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Email not provided');
+      email = profile.emails[0].value;
+      name = profile.displayName;
+      providerId = profile.id;
+      oauthAccessToken = profile.googleAccessToken!;
+      oauthRefreshToken = profile.googleRefreshToken;
+      break;
+    case AUTH_PROVIDER.MICROSOFT:
+      email = profile._json?.mail || profile._json?.userPrincipalName || '';
+      if (!email)
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Email not provided');
+      name = profile.displayName;
+      providerId = profile.id;
+      oauthAccessToken = profile.microsoftAccessToken!;
+      oauthRefreshToken = profile.microsoftRefreshToken;
+      break;
+    default:
+      throw new ApiError(StatusCodes.BAD_REQUEST, 'Unsupported provider');
   }
 
-  try {
-    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
-    oauth2Client.setCredentials({ refresh_token: decryptedToken });
-    const { credentials } = await oauth2Client.refreshAccessToken();
-
-    user.googleAccessToken = credentials.access_token
-      ? encryptionHelper.encrypt(credentials.access_token)
-      : undefined;
-
-    if (credentials.refresh_token) {
-      user.refreshToken = encryptionHelper.encrypt(credentials.refresh_token);
-    }
-
-    await user.save();
-    return credentials.access_token;
-  } catch (error) {
-    console.error('Token refresh error:', error);
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      'Failed to refresh token'
-    );
-  }
-};
-
-const googleLoginIntoDB = async (payload: any) => {
-  const { code } = payload;
-
-  try {
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-
-    const oauth2 = google.oauth2({ auth: oauth2Client, version: 'v2' });
-    const { data } = await oauth2.userinfo.get();
-
-    if (!data.email) {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'Email not provided by Google'
-      );
-    }
-
-    // Check if user exists with this email
-    let user = await User.isExistUserByEmail(data.email);
-
-    if (user) {
-      // Update existing user's Google credentials
-      user.googleId = data.id ?? undefined;
-      user.googleAccessToken = tokens.access_token
-        ? encryptionHelper.encrypt(tokens.access_token)
-        : undefined;
-
-      if (tokens.refresh_token) {
-        user.refreshToken = tokens.refresh_token
-          ? encryptionHelper.encrypt(tokens.refresh_token)
-          : undefined;
-      }
-      user.authProvider = AUTH_PROVIDER.GOOGLE;
-      user.lastSync = new Date(); // Update lastSync
-      await user.save();
-    } else {
-      // Create new user with encrypted tokens
-      user = await User.create({
-        email: data.email,
-        name: data.name,
-        image: data.picture,
-        authProvider: AUTH_PROVIDER.GOOGLE,
-        googleId: data.id,
-        googleAccessToken: tokens.access_token
-          ? encryptionHelper.encrypt(tokens.access_token)
-          : undefined,
-        refreshToken: tokens.refresh_token
-          ? encryptionHelper.encrypt(tokens.refresh_token)
-          : undefined,
-        verified: true,
-        status: USER_STATUS.ACTIVE,
-        lastSync: new Date(),
-      });
-    }
-
-    // Generate JWT token
-    const accessToken = jwtHelper.createToken(
-      { userId: user._id },
-      config.jwt.secret as string,
-      config.jwt.expire_in as string
-    );
-
-    return {
-      accessToken,
-      user: {
-        id: user._id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        image: user.image,
-      },
-    };
-  } catch (error) {
-    console.error('Authentication error:', error);
-    if (axios.isAxiosError(error)) {
-      throw new ApiError(
-        StatusCodes.INTERNAL_SERVER_ERROR,
-        `Failed to authenticate with provider: ${
-          error.response?.data?.error || error.message
-        }`
-      );
-    }
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      `Failed to authenticate with provider: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`
-    );
-  }
-};
-
-const refreshMicrosoftToken = async (userId: string) => {
-  const user = await User.findById(userId).select('+refreshToken');
-  if (!user || !user.refreshToken) {
-    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
-  }
-
-  try {
-    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
-
-    // Request new access token using refresh token
-    const tokenResponse = await axios.post(
-      'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-      new URLSearchParams({
-        client_id: config.oauth.microsoft.client_id as string,
-        client_secret: config.oauth.microsoft.client_secret as string,
-        refresh_token: decryptedToken,
-        grant_type: 'refresh_token',
-      }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    // Update tokens in database
-    user.microsoftAccessToken = tokenResponse.data.access_token
-      ? encryptionHelper.encrypt(tokenResponse.data.access_token)
-      : undefined;
-
-    if (tokenResponse.data.refresh_token) {
-      user.refreshToken = encryptionHelper.encrypt(
-        tokenResponse.data.refresh_token
-      );
-    }
-
+  user = await User.isExistUserByEmail(email);
+  if (user) {
+    user.authProvider = provider;
+    if (provider === AUTH_PROVIDER.GOOGLE) user.googleId = providerId;
+    if (provider === AUTH_PROVIDER.MICROSOFT) user.microsoftId = providerId;
+    user[
+      provider === AUTH_PROVIDER.GOOGLE
+        ? 'googleAccessToken'
+        : 'microsoftAccessToken'
+    ] = encryptionHelper.encrypt(oauthAccessToken);
+    if (oauthRefreshToken)
+      user.refreshToken = encryptionHelper.encrypt(oauthRefreshToken);
     user.lastSync = new Date();
     await user.save();
-    return tokenResponse.data.access_token;
-  } catch (error) {
-    console.error('Microsoft token refresh error:', error);
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      'Failed to refresh Microsoft token'
-    );
+  } else {
+    user = await User.create({
+      email,
+      name,
+      authProvider: provider,
+      [provider === AUTH_PROVIDER.GOOGLE ? 'googleId' : 'microsoftId']:
+        providerId,
+      [provider === AUTH_PROVIDER.GOOGLE
+        ? 'googleAccessToken'
+        : 'microsoftAccessToken']: encryptionHelper.encrypt(oauthAccessToken),
+      refreshToken: oauthRefreshToken
+        ? encryptionHelper.encrypt(oauthRefreshToken)
+        : undefined,
+      role: USER_ROLES.USER,
+      verified: true,
+      status: USER_STATUS.ACTIVE,
+      lastSync: new Date(),
+    });
   }
+
+  const jwtPayload = {
+    userId: user._id.toString(),
+    role: user.role,
+    email: user.email,
+    name: user.name,
+  };
+  const jwtAccessToken = jwtHelper.createToken(
+    jwtPayload,
+    config.jwt.secret,
+    config.jwt.expire_in
+  );
+
+  return {
+    accessToken: jwtAccessToken,
+    user: {
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      image: user.image,
+    },
+  };
 };
 
-const refreshYahooToken = async (userId: string) => {
-  const user = await User.findById(userId).select('+refreshToken');
-  if (!user || !user.refreshToken) {
-    throw new ApiError(StatusCodes.UNAUTHORIZED, 'No refresh token available');
-  }
-
-  try {
-    const decryptedToken = encryptionHelper.decrypt(user.refreshToken);
-
-    // Request new access token using refresh token
-    const tokenResponse = await axios.post(
-      'https://api.login.yahoo.com/oauth2/get_token',
-      new URLSearchParams({
-        client_id: config.oauth.yahoo.client_id as string,
-        client_secret: config.oauth.yahoo.client_secret as string,
-        refresh_token: decryptedToken,
-        grant_type: 'refresh_token',
-      }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    // Update tokens in database
-    user.yahooAccessToken = tokenResponse.data.access_token
-      ? encryptionHelper.encrypt(tokenResponse.data.access_token)
-      : undefined;
-
-    if (tokenResponse.data.refresh_token) {
-      user.refreshToken = encryptionHelper.encrypt(
-        tokenResponse.data.refresh_token
-      );
-    }
-
-    user.lastSync = new Date();
-    await user.save();
-    return tokenResponse.data.access_token;
-  } catch (error) {
-    console.error('Yahoo token refresh error:', error);
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      'Failed to refresh Yahoo token'
-    );
-  }
-};
-
-const microsoftLoginIntoDB = async (payload: any) => {
-  const { code } = payload;
-
-  try {
-    // Exchange code for tokens
-    const tokenResponse = await axios.post(
-      'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-      new URLSearchParams({
-        client_id: config.oauth.microsoft.client_id as string,
-        client_secret: config.oauth.microsoft.client_secret as string,
-        code,
-        redirect_uri: config.oauth.microsoft.redirect_uri as string,
-        grant_type: 'authorization_code',
-      }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    // Get user info from Microsoft Graph API
-    const userResponse = await axios.get(
-      'https://graph.microsoft.com/v1.0/me',
-      {
-        headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
-      }
-    );
-
-    const { id, mail, displayName } = userResponse.data;
-
-    if (!mail) {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'Email not provided by Microsoft'
-      );
-    }
-
-    // Check if user exists
-    let user = await User.isExistUserByEmail(mail);
-
-    if (user) {
-      // Update existing user's Microsoft credentials
-      user.microsoftId = id;
-      user.microsoftAccessToken = encryptionHelper.encrypt(
-        tokenResponse.data.access_token
-      );
-      if (tokenResponse.data.refresh_token) {
-        user.refreshToken = encryptionHelper.encrypt(
-          tokenResponse.data.refresh_token
-        );
-      }
-      user.authProvider = AUTH_PROVIDER.MICROSOFT;
-      user.lastSync = new Date();
-      await user.save();
-    } else {
-      // Create new user with encrypted tokens
-      user = await User.create({
-        email: mail,
-        name: displayName,
-        authProvider: AUTH_PROVIDER.MICROSOFT,
-        microsoftId: id,
-        microsoftAccessToken: encryptionHelper.encrypt(
-          tokenResponse.data.access_token
-        ),
-        refreshToken: tokenResponse.data.refresh_token
-          ? encryptionHelper.encrypt(tokenResponse.data.refresh_token)
-          : undefined,
-        verified: true,
-        status: USER_STATUS.ACTIVE,
-        lastSync: new Date(),
-      });
-    }
-
-    // Generate JWT token
-    const accessToken = jwtHelper.createToken(
-      { userId: user._id },
-      config.jwt.secret as string,
-      config.jwt.expire_in as string
-    );
-
-    return {
-      accessToken,
-      user: {
-        id: user._id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        image: user.image,
-      },
-    };
-  } catch (error) {
-    console.error('Authentication error:', error);
-    if (axios.isAxiosError(error)) {
-      throw new ApiError(
-        StatusCodes.INTERNAL_SERVER_ERROR,
-        `Failed to authenticate with provider: ${
-          error.response?.data?.error || error.message
-        }`
-      );
-    }
-    throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      `Failed to authenticate with provider: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`
-    );
-  }
-};
-
-const yahooLoginIntoDB = async (payload: any) => {
-  const { code } = payload;
-
+const yahooLoginIntoDB = async ({
+  code,
+}: {
+  code: string;
+}): Promise<IOAuthLoginResponse> => {
   try {
     // Exchange code for tokens
     const tokenResponse = await axios.post(
       'https://api.login.yahoo.com/oauth2/get_token',
-      new URLSearchParams({
-        client_id: config.oauth.yahoo.client_id as string,
-        client_secret: config.oauth.yahoo.client_secret as string,
-        code,
-        redirect_uri: config.oauth.yahoo.redirect_uri as string,
+      {
         grant_type: 'authorization_code',
-      }).toString(),
+        code,
+        redirect_uri: config.oauth.yahoo.redirect_uri,
+        client_id: config.oauth.yahoo.client_id,
+        client_secret: config.oauth.yahoo.client_secret,
+      },
       {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -366,70 +141,69 @@ const yahooLoginIntoDB = async (payload: any) => {
       }
     );
 
-    // Get user info
+    const { access_token } = tokenResponse.data;
+
+    // Get user info from Yahoo
     const userResponse = await axios.get(
       'https://api.login.yahoo.com/openid/v1/userinfo',
       {
-        headers: { Authorization: `Bearer ${tokenResponse.data.access_token}` },
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+        },
       }
     );
 
-    const { sub, email, name } = userResponse.data;
+    const yahooUser = userResponse.data;
 
-    if (!email) {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'Email not provided by Yahoo'
-      );
-    }
+    // Find or create user
+    let user = await User.findOne({ email: yahooUser.email });
 
-    // Check if user exists
-    let user = await User.isExistUserByEmail(email);
-
-    if (user) {
-      // Update existing user's Yahoo credentials
-      user.yahooId = sub;
-      user.yahooAccessToken = encryptionHelper.encrypt(
-        tokenResponse.data.access_token
-      );
-      if (tokenResponse.data.refresh_token) {
-        user.refreshToken = encryptionHelper.encrypt(
-          tokenResponse.data.refresh_token
-        );
-      }
-      user.authProvider = AUTH_PROVIDER.YAHOO;
-      user.lastSync = new Date();
-      await user.save();
-    } else {
-      // Create new user with encrypted tokens
+    if (!user) {
       user = await User.create({
-        email,
-        name,
+        email: yahooUser.email,
+        name: yahooUser.name,
+        yahooId: yahooUser.sub,
+        yahooAccessToken: access_token,
         authProvider: AUTH_PROVIDER.YAHOO,
-        yahooId: sub,
-        yahooAccessToken: encryptionHelper.encrypt(
-          tokenResponse.data.access_token
-        ),
-        refreshToken: tokenResponse.data.refresh_token
-          ? encryptionHelper.encrypt(tokenResponse.data.refresh_token)
-          : undefined,
+        role: USER_ROLES.USER,
         verified: true,
         status: USER_STATUS.ACTIVE,
-        lastSync: new Date(),
       });
+    } else {
+      user.yahooId = yahooUser.sub;
+      user.yahooAccessToken = access_token;
+      user.authProvider = AUTH_PROVIDER.YAHOO;
+      await user.save();
     }
 
-    // Generate JWT token
+    // Generate tokens
     const accessToken = jwtHelper.createToken(
-      { userId: user._id },
-      config.jwt.secret as string,
-      config.jwt.expire_in as string
+      {
+        userId: user._id.toString(),
+        role: user.role,
+        email: user.email,
+        name: user.name,
+      },
+      config.jwt.secret,
+      config.jwt.expire_in
+    );
+
+    const refreshToken = jwtHelper.createToken(
+      {
+        userId: user._id.toString(),
+        role: user.role,
+        email: user.email,
+        name: user.name,
+      },
+      config.jwt.refresh_secret,
+      config.jwt.refresh_expires_in
     );
 
     return {
       accessToken,
+      refreshToken,
       user: {
-        id: user._id,
+        id: user._id.toString(),
         email: user.email,
         name: user.name,
         role: user.role,
@@ -437,31 +211,85 @@ const yahooLoginIntoDB = async (payload: any) => {
       },
     };
   } catch (error) {
-    console.error('Authentication error:', error);
-    if (axios.isAxiosError(error)) {
-      throw new ApiError(
-        StatusCodes.INTERNAL_SERVER_ERROR,
-        `Failed to authenticate with provider: ${
-          error.response?.data?.error || error.message
-        }`
-      );
-    }
     throw new ApiError(
-      StatusCodes.INTERNAL_SERVER_ERROR,
-      `Failed to authenticate with provider: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`
+      StatusCodes.UNAUTHORIZED,
+      'Failed to authenticate with Yahoo'
     );
   }
+};
+
+
+const localLoginIntoDB = async (payload: {
+  email: string;
+  password: string;
+}) => {
+  const user = await User.isExistUserByEmail(payload.email);
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  if (user.authProvider !== AUTH_PROVIDER.LOCAL)
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Use OAuth login for this account'
+    );
+  if (
+    !user.password ||
+    !(await bcrypt.compare(payload.password, user.password))
+  ) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid credentials');
+  }
+
+  const jwtPayload = { userId: user._id.toString(), role: user.role };
+  const accessToken = jwtHelper.createAccessToken(jwtPayload);
+  const refreshToken = jwtHelper.createRefreshToken(jwtPayload);
+  return { user, accessToken, refreshToken };
+};
+
+const refreshToken = async (refreshToken: string) => {
+  const decoded = jwtHelper.verifyToken<{ userId: string; role: string }>(
+    refreshToken,
+    config.jwt.refresh_secret
+  );
+  const user = await User.isExistUserById(decoded.userId);
+  if (!user || user.status !== USER_STATUS.ACTIVE)
+    throw new ApiError(StatusCodes.FORBIDDEN, 'User not found or inactive');
+
+  const jwtPayload = { userId: user._id.toString(), role: user.role };
+  const accessToken = jwtHelper.createAccessToken(jwtPayload);
+  return { accessToken };
+};
+
+const logout = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+
+  user.googleAccessToken = undefined;
+  user.microsoftAccessToken = undefined;
+  user.yahooAccessToken = undefined;
+  user.refreshToken = undefined;
+  user.lastSync = new Date();
+  await user.save();
+};
+
+const getCurrentUser = async (userId: string) => {
+  console.log('Getting current user with ID:', userId);
+
+  if (!userId) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'User ID is required');
+  }
+
+  const user = await User.findById(userId).select('-password');
+
+  if (!user) {
+    console.log('User not found with ID:', userId);
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  return user;
 };
 
 const updateProfile = async (userId: string, profileData: Partial<IUser>) => {
   const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
 
-  // Only allow updating specific fields
   const allowedUpdates = [
     'name',
     'phone',
@@ -470,87 +298,47 @@ const updateProfile = async (userId: string, profileData: Partial<IUser>) => {
     'gender',
     'dateOfBirth',
   ] as const;
+  const filteredData = Object.fromEntries(
+    Object.entries(profileData).filter(([key]) =>
+      allowedUpdates.includes(key as any)
+    )
+  );
 
-  // Create a type-safe version of the allowed updates
-  type AllowedUpdateKeys = (typeof allowedUpdates)[number];
-
-  // Filter out any fields that aren't in allowedUpdates
-  const filteredData = Object.keys(profileData).reduce((acc, key) => {
-    if (allowedUpdates.includes(key as AllowedUpdateKeys)) {
-      // Type assertion to handle the index signature issue
-      (acc as any)[key] = profileData[key as keyof typeof profileData];
-    }
-    return acc;
-  }, {} as Partial<IUser>);
-
-  // Update user with filtered data
   Object.assign(user, filteredData);
-
-  // Update lastSync timestamp
   user.lastSync = new Date();
-
   await user.save();
   return user;
 };
 
-const logout = async (userId: string) => {
+const updateSubscription = async (
+  userId: string,
+  subscriptionData: { plan: USER_PLAN; autoRenew?: boolean }
+) => {
   const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
 
-  // Clear OAuth tokens
-  user.googleAccessToken = undefined;
-  user.microsoftAccessToken = undefined;
-  user.yahooAccessToken = undefined;
-  user.refreshToken = undefined;
-  user.lastSync = new Date();
-  await user.save();
-
-  return null;
-};
-
-const getCurrentUser = async (userId: string) => {
-  const user = await User.findById(userId).select('-password');
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
-  return user;
-};
-
-// In updateSubscription method
-const updateSubscription = async (userId: string, subscriptionData: any) => {
-  const user = await User.findById(userId);
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
-
-  // Define plan types with type safety
-  type SubscriptionPlan = 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
-
-  // If plan is changing, update end date accordingly
   if (
     subscriptionData.plan &&
     subscriptionData.plan !== user.subscription.plan
   ) {
-    // Calculate new end date based on plan with type-safe index
-    const endDateMap: Record<SubscriptionPlan, Date> = {
-      FREE: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-      BASIC: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-      PRO: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
-      ENTERPRISE: new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000), // 2 years
+    const endDateMap: Record<USER_PLAN, Date> = {
+      [USER_PLAN.FREE]: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      [USER_PLAN.BASIC]: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+      [USER_PLAN.PREMIUM]: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      [USER_PLAN.ENTERPRISE]: new Date(
+        Date.now() + 2 * 365 * 24 * 60 * 60 * 1000
+      ),
     };
 
-    subscriptionData.startDate = new Date();
-    subscriptionData.endDate =
-      endDateMap[subscriptionData.plan as SubscriptionPlan];
-    subscriptionData.status = 'ACTIVE';
+    user.subscription.plan = subscriptionData.plan;
+    user.subscription.startDate = new Date();
+    user.subscription.endDate = endDateMap[subscriptionData.plan];
+    user.subscription.status = 'ACTIVE';
   }
 
-  user.subscription = {
-    ...user.subscription,
-    ...subscriptionData,
-  };
+  if (typeof subscriptionData.autoRenew === 'boolean') {
+    user.subscription.autoRenew = subscriptionData.autoRenew;
+  }
 
   user.lastSync = new Date();
   await user.save();
@@ -558,14 +346,12 @@ const updateSubscription = async (userId: string, subscriptionData: any) => {
 };
 
 export const UserService = {
-  googleLoginIntoDB,
-  microsoftLoginIntoDB,
+  handleOAuthCallback,
   yahooLoginIntoDB,
-  refreshGoogleToken,
-  refreshMicrosoftToken,
-  refreshYahooToken,
-  updateProfile,
+  localLoginIntoDB,
+  refreshToken,
   logout,
   getCurrentUser,
+  updateProfile,
   updateSubscription,
 };

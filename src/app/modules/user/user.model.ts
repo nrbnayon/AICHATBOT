@@ -1,56 +1,40 @@
-// src\app\modules\user\user.model.ts
 import { model, Schema } from 'mongoose';
+import bcrypt from 'bcrypt';
 import {
   AUTH_PROVIDER,
   USER_GENDER,
+  USER_PLAN,
   USER_ROLES,
   USER_STATUS,
 } from '../../../enums/common';
-import { IUser, UserModal } from './user.interface';
+import { IUser, UserModel } from './user.interface';
+import config from '../../../config';
 
 const userSubscriptionSchema = new Schema({
   plan: {
     type: String,
-    enum: ['FREE', 'BASIC', 'PRO', 'ENTERPRISE'],
-    default: 'FREE',
+    enum: Object.values(USER_PLAN),
+    default: USER_PLAN.FREE,
   },
-  startDate: {
-    type: Date,
-    default: Date.now,
-  },
+  startDate: { type: Date, default: Date.now },
   endDate: {
     type: Date,
-    default: () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
+    default: () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
   },
   status: {
     type: String,
     enum: ['ACTIVE', 'EXPIRED', 'CANCELLED'],
     default: 'ACTIVE',
   },
-  stripeCustomerId: {
-    type: String,
-  },
-  stripeSubscriptionId: {
-    type: String,
-  },
-  dailyRequests: {
-    type: Number,
-    default: 0,
-  },
-  dailyTokens: {
-    type: Number,
-    default: 0,
-  },
-  lastRequestDate: {
-    type: Date,
-  },
-  autoRenew: {
-    type: Boolean,
-    default: true,
-  },
+  stripeCustomerId: { type: String },
+  stripeSubscriptionId: { type: String },
+  dailyRequests: { type: Number, default: 0 },
+  dailyTokens: { type: Number, default: 0 },
+  lastRequestDate: { type: Date },
+  autoRenew: { type: Boolean, default: true },
 });
 
-const userSchema = new Schema<IUser, UserModal>(
+const userSchema = new Schema<IUser, UserModel>(
   {
     role: {
       type: String,
@@ -58,16 +42,8 @@ const userSchema = new Schema<IUser, UserModal>(
       default: USER_ROLES.USER,
       required: true,
     },
-    name: {
-      type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-    },
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true },
     authProvider: {
       type: String,
       enum: Object.values(AUTH_PROVIDER),
@@ -75,76 +51,34 @@ const userSchema = new Schema<IUser, UserModal>(
     },
     image: String,
     phone: String,
-    password: {
-      type: String,
-      select: 0,
-    },
+    password: { type: String },
     address: String,
-
-    // OAuth fields
-    googleId: {
-      type: String,
-      sparse: true,
-    },
-    microsoftId: {
-      type: String,
-      sparse: true,
-    },
-    yahooId: {
-      type: String,
-      sparse: true,
-    },
-    googleAccessToken: {
-      type: String,
-      select: 0,
-    },
-    microsoftAccessToken: {
-      type: String,
-      select: 0,
-    },
-    yahooAccessToken: {
-      type: String,
-      select: 0,
-    },
-    refreshToken: {
-      type: String,
-      select: 0,
-    },
-
+    googleId: { type: String, sparse: true },
+    microsoftId: { type: String, sparse: true },
+    yahooId: { type: String, sparse: true },
+    googleAccessToken: String,
+    microsoftAccessToken: String,
+    yahooAccessToken: String,
+    refreshToken: String,
     country: String,
     status: {
       type: String,
       enum: Object.values(USER_STATUS),
       default: USER_STATUS.ACTIVE,
     },
-    verified: {
-      type: Boolean,
-      default: false,
-    },
-    gender: {
-      type: String,
-      enum: Object.values(USER_GENDER),
-    },
+    verified: { type: Boolean, default: false },
+    gender: { type: String, enum: Object.values(USER_GENDER) },
     dateOfBirth: Date,
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
+    isActive: { type: Boolean, default: true },
     lastActiveAt: Date,
-    lastSync: {
-      type: Date,
-      default: Date.now,
-    },
-    subscription: {
-      type: userSubscriptionSchema,
-      default: () => ({}),
-    },
+    lastSync: { type: Date, default: Date.now },
+    subscription: { type: userSubscriptionSchema, default: () => ({}) },
   },
   {
     timestamps: true,
     toJSON: {
       virtuals: true,
-      transform: function (doc, ret) {
+      transform: (doc, ret) => {
         delete ret.password;
         delete ret.googleAccessToken;
         delete ret.microsoftAccessToken;
@@ -156,7 +90,16 @@ const userSchema = new Schema<IUser, UserModal>(
   }
 );
 
-// Static methods
+userSchema.pre('save', async function (next) {
+  if (this.isModified('password') && this.password) {
+    this.password = await bcrypt.hash(
+      this.password,
+      config.security.bcrypt_salt_rounds
+    );
+  }
+  next();
+});
+
 userSchema.statics.isExistUserById = async function (
   id: string
 ): Promise<IUser | null> {
@@ -188,4 +131,4 @@ userSchema.statics.isExistUserByProvider = async function (
   return await this.findOne(query);
 };
 
-export const User = model<IUser, UserModal>('User', userSchema);
+export const User = model<IUser, UserModel>('User', userSchema);

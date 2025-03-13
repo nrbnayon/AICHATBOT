@@ -1,10 +1,13 @@
 import cors from 'cors';
 import express, { Request, Response } from 'express';
+import session from 'express-session';
 import { StatusCodes } from 'http-status-codes';
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
 import router from './routes';
 import { Morgan } from './shared/morgen';
 import responseInterceptor from './app/middlewares/responseInterceptor';
+import passport from './config/passport';
+import config from './config';
 
 const app = express();
 
@@ -12,17 +15,40 @@ const app = express();
 app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
+// Enhanced CORS configuration
 app.use(
   cors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://192.168.10.19:3000',
-      'http://10.0.70.173:50262',
-      'https://your-frontend-domain.vercel.app',
-      'https://your-app-name.vercel.app',
-    ],
+    origin: 'http://localhost:5173', // Ensure this matches your frontend URL exactly (e.g., http://localhost:3000)
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Access-Control-Allow-Credentials',
+      'Access-Control-Allow-Origin',
+    ],
+    exposedHeaders: ['set-cookie'],
+  })
+);
+
+// Handle preflight requests
+app.options('*', cors());
+
+app.use(
+  session({
+    secret: config.jwt.secret || 'your-session-secret',
+
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      // secure: config.node_env === 'production',
+      // httpOnly: true,
+      // sameSite: config.node_env === 'production' ? 'none' : 'lax',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+    },
   })
 );
 
@@ -33,20 +59,22 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use(express.static('uploads'));
 
+app.use(passport.initialize());
+app.use(passport.session());
+
 app.use('/api/v1', router);
 
 // Home route - serving the HTML content
 app.get('/', (req: Request, res: Response) => {
+  console.log('Home route accessed');
   res.send(`
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Chatbot Project - Client Information</title>
 </head>
-
 <body style="
       font-family: Verdana, Geneva, Tahoma, sans-serif;
       background-color: #f9f9f9;
@@ -139,7 +167,6 @@ app.get('/', (req: Request, res: Response) => {
     </div>
   </div>
 </body>
-
 </html>
   `);
 });
@@ -149,6 +176,7 @@ app.use(globalErrorHandler);
 
 // Handle not found routes
 app.use((req, res) => {
+  console.log('Route not found:', req.originalUrl);
   res.status(StatusCodes.NOT_FOUND).json({
     success: false,
     message: '❌ API Not Found',
@@ -162,65 +190,3 @@ app.use((req, res) => {
 });
 
 export default app;
-// import cors from 'cors';
-// import express, { Request, Response } from 'express';
-// import { StatusCodes } from 'http-status-codes';
-// import globalErrorHandler from './app/middlewares/globalErrorHandler';
-// import router from './routes';
-// import { Morgan } from './shared/morgen';
-// import responseInterceptor from './app/middlewares/responseInterceptor';
-
-// const app = express();
-
-// // Morgan
-// app.use(Morgan.successHandler);
-// app.use(Morgan.errorHandler);
-
-// app.use(
-//   cors({
-//     origin: [
-//       'http://localhost:3000',
-//       'http://localhost:5173',
-//       'http://192.168.10.19:3000',
-//       'http://10.0.70.173:50262',
-//       'https://your-frontend-domain.vercel.app',
-//       'https://your-app-name.vercel.app',
-//     ],
-//     credentials: true,
-//   })
-// );
-
-// app.use(responseInterceptor);
-
-// app.use(express.json({ limit: '10mb' }));
-// app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// app.use(express.static('uploads'));
-
-// app.use('/api/v1', router);
-
-// // Home route
-// app.get('/', (req: Request, res: Response) => {
-//   res.send(
-//     '<h1 style="text-align:center; color:#A55FEF; font-family:Verdana;">Hey Frontend Developer, How can I assist you today!</h1>'
-//   );
-// });
-
-// // Error handling
-// app.use(globalErrorHandler);
-
-// // Handle not found routes
-// app.use((req, res) => {
-//   res.status(StatusCodes.NOT_FOUND).json({
-//     success: false,
-//     message: '❌ API Not Found',
-//     errorMessages: [
-//       {
-//         path: req.originalUrl,
-//         message: "🚫 API DOESN'T EXIST",
-//       },
-//     ],
-//   });
-// });
-
-// export default app;

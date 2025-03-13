@@ -8,14 +8,11 @@ import {
 } from '../../../enums/common';
 
 export type IUserSubscription = {
-  // plan: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
   plan: USER_PLAN;
   startDate: Date;
   endDate: Date;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
-
-  // Usage limits tracking
   dailyRequests: number;
   dailyTokens: number;
   lastRequestDate?: Date;
@@ -33,8 +30,6 @@ export interface IUser extends Document {
   phone?: string;
   password?: string;
   address?: string;
-
-  // OAuth IDs and tokens
   googleId?: string;
   microsoftId?: string;
   yahooId?: string;
@@ -42,8 +37,6 @@ export interface IUser extends Document {
   microsoftAccessToken?: string;
   yahooAccessToken?: string;
   refreshToken?: string;
-
-  // Additional user info
   country?: string;
   status: USER_STATUS;
   verified: boolean;
@@ -54,12 +47,34 @@ export interface IUser extends Document {
   createdAt?: Date;
   updatedAt?: Date;
   lastSync: Date;
-
-  // Subscription info
   subscription: IUserSubscription;
 }
 
-export type UserModal = {
+export interface ILoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: USER_ROLES;
+    image?: string;
+  };
+}
+
+export interface IOAuthLoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: USER_ROLES;
+    image?: string;
+  };
+}
+
+export type UserModel = {
   isExistUserById(id: string): Promise<IUser | null>;
   isExistUserByEmail(email: string): Promise<IUser | null>;
   isExistUserByProvider(

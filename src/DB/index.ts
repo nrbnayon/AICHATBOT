@@ -1,7 +1,7 @@
 import colors from 'colors';
 import { User } from '../app/modules/user/user.model';
 import config from '../config';
-import { USER_ROLES } from '../enums/common';
+import { AUTH_PROVIDER, USER_ROLES, USER_STATUS } from '../enums/common';
 import { logger } from '../shared/logger';
 
 const superUser = {
@@ -11,6 +11,8 @@ const superUser = {
   password: config.admin.password,
   image: '',
   verified: true,
+  status: USER_STATUS.ACTIVE,
+  authProvider: AUTH_PROVIDER.LOCAL,
 };
 
 const seedAdmin = async () => {
