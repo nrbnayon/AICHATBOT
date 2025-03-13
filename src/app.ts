@@ -1,3 +1,4 @@
+// src/app.ts
 import cors from 'cors';
 import express, { Request, Response } from 'express';
 import session from 'express-session';
@@ -18,7 +19,7 @@ app.use(Morgan.errorHandler);
 // Enhanced CORS configuration
 app.use(
   cors({
-    origin: 'http://localhost:5173', // Ensure this matches your frontend URL exactly (e.g., http://localhost:3000)
+    origin: config.frontend.url, // Use config for consistency
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -34,21 +35,17 @@ app.use(
 // Handle preflight requests
 app.options('*', cors());
 
+// Session middleware (optional, consider removing if using JWTs only)
 app.use(
   session({
     secret: config.jwt.secret || 'your-session-secret',
-
     resave: false,
     saveUninitialized: false,
     cookie: {
-      // secure: config.node_env === 'production',
-      // httpOnly: true,
-      // sameSite: config.node_env === 'production' ? 'none' : 'lax',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
-    },
+      secure: config.cookies.secure,
+      httpOnly: config.cookies.httpOnly,
+      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict'
+    }, // Use config for consistency
   })
 );
 

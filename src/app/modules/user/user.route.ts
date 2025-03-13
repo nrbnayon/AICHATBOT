@@ -1,3 +1,4 @@
+// src/app/modules/user/user.route.ts
 import { UserController } from './user.controller';
 import express from 'express';
 import auth from '../../middlewares/auth';
@@ -15,15 +16,19 @@ const router = express.Router();
 
 // OAuth Routes
 router.get(
-  '/google-login',
+  '/google/login',
   passport.authenticate('google', {
-    scope: ['profile', 'email'],
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ],
     session: true,
   })
 );
 
 router.get(
-  '/auth/google/callback',
+  '/google/callback',
   passport.authenticate('google', {
     failureRedirect: `${config.frontend.url}/login?error=Google authentication failed`,
     session: true,
@@ -32,15 +37,15 @@ router.get(
 );
 
 router.get(
-  '/microsoft-login',
+  '/microsoft/login',
   passport.authenticate('microsoft', {
-    scope: ['user.read', 'user.read.all', 'mail.read'],
+    scope: ['user.read', 'Mail.Read'],
     session: true,
   })
 );
 
 router.get(
-  '/auth/microsoft/callback',
+  '/microsoft/callback',
   passport.authenticate('microsoft', {
     failureRedirect: `${config.frontend.url}/login?error=Microsoft authentication failed`,
     session: true,
@@ -49,24 +54,24 @@ router.get(
 );
 
 // Yahoo OAuth
-router.get('/yahoo-login', UserController.yahooLogin);
-router.get('/auth/yahoo/callback', UserController.yahooCallback);
+router.get('/yahoo/login', UserController.yahooLogin);
+router.get('/yahoo/callback', UserController.yahooCallback);
 
 // Local Authentication Routes
 router.post(
-  '/auth/login',
+  '/login',
   authLimiter,
   validateRequest(UserValidation.loginZodSchema),
   UserController.localLogin
 );
 
 router.post(
-  '/auth/refresh-token',
+  '/refresh-token',
   validateRequest(UserValidation.refreshTokenZodSchema),
   UserController.refreshToken
 );
 
-router.post('/auth/logout', auth(), apiLimiter, UserController.logout);
+router.post('/logout', auth(), apiLimiter, UserController.logout);
 
 // Protected Routes
 router.get(
@@ -90,6 +95,14 @@ router.patch(
   apiLimiter,
   validateRequest(UserValidation.updateSubscriptionSchema),
   UserController.updateSubscription
+);
+
+// Email Access Routes
+router.get(
+  '/emails',
+  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
+  apiLimiter,
+  UserController.fetchEmails
 );
 
 export const UserRoutes = router;

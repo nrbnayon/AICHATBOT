@@ -1,3 +1,4 @@
+// src/config/passport.ts
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as MicrosoftStrategy } from 'passport-microsoft';
@@ -18,14 +19,18 @@ passport.deserializeUser(async (id: string, done) => {
   }
 });
 
-// Google OAuth Strategy
+// Google OAuth Strategy (Gmail email access)
 passport.use(
   new GoogleStrategy(
     {
       clientID: config.oauth.google.client_id || '',
       clientSecret: config.oauth.google.client_secret || '',
       callbackURL: config.oauth.google.redirect_uri,
-      scope: ['profile', 'email'],
+      scope: [
+        'profile',
+        'email',
+        'https://www.googleapis.com/auth/gmail.readonly', // Add Gmail email access
+      ],
     },
     async (
       accessToken: string,
@@ -75,14 +80,17 @@ passport.use(
   )
 );
 
-// Microsoft OAuth Strategy
+// Microsoft OAuth Strategy (Outlook email access)
 passport.use(
   new MicrosoftStrategy(
     {
       clientID: config.oauth.microsoft.client_id || '',
       clientSecret: config.oauth.microsoft.client_secret || '',
       callbackURL: config.oauth.microsoft.redirect_uri,
-      scope: ['user.read', 'user.read.all', 'mail.read'],
+      scope: [
+        'user.read',
+        'Mail.Read', // Add Outlook email access
+      ],
       tenant: 'common',
     },
     async (

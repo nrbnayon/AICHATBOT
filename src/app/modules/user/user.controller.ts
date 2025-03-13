@@ -1,3 +1,4 @@
+// src\app\modules\user\user.controller.ts
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
@@ -6,6 +7,35 @@ import { UserService } from './user.service';
 import config from '../../../config';
 import { AuthRequest } from '../../middlewares/auth';
 import { jwtHelper } from '../../../helpers/jwtHelper';
+import ApiError from '../../../errors/ApiError';
+
+const fetchEmails = catchAsync(async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const userId = authReq.user?.userId;
+  const provider = req.query.provider as string;
+
+  let emails;
+  switch (provider) {
+    case 'google':
+      emails = await UserService.fetchGmailEmails(userId);
+      break;
+    case 'microsoft':
+      emails = await UserService.fetchOutlookEmails(userId);
+      break;
+    case 'yahoo':
+      emails = await UserService.fetchYahooEmails(userId);
+      break;
+    default:
+      throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid provider');
+  }
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: `Emails fetched successfully from ${provider}`,
+    data: emails,
+  });
+});
 
 const googleCallback = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
@@ -41,31 +71,21 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
     config.jwt.refresh_expires_in
   );
 
-  // Set cookies with proper configuration
   console.log('Setting auth cookies');
   res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: false,
-    sameSite: 'lax',
-    // secure: config.node_env === 'production',
-    // sameSite: config.node_env === 'production' ? 'none' : 'lax',
-    // path: '/',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    ...config.cookies,
+    sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
   });
-
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: false,
-    sameSite: 'lax',
-    // httpOnly: true,
-    // secure: config.node_env === 'production',
-    // sameSite: config.node_env === 'production' ? 'none' : 'lax',
-    // path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    ...config.cookies,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
+    sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
   });
 
   console.log('Auth cookies set, redirecting to dashboard');
-  return res.redirect(`${config.frontend.url}/dashboard`);
+  return res.redirect(
+    `${config.frontend.url}/dashboard?token=${accessToken}&success=Google authentication successful`
+  );
 });
 
 const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
@@ -102,27 +122,19 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
 
   console.log('Setting auth cookies for Microsoft');
   res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    ...config.cookies,
+    sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
   });
-
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    ...config.cookies,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
+    sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
   });
 
   console.log('Auth cookies set, redirecting to dashboard');
-  return res.redirect(`${config.frontend.url}/dashboard`);
-});
-
-const yahooLogin = catchAsync(async (req: Request, res: Response) => {
-  console.log('Initiating Yahoo login');
-  const yahooAuthUrl = `https://api.login.yahoo.com/oauth2/request_auth?client_id=${config.oauth.yahoo.client_id}&response_type=code&redirect_uri=${config.oauth.yahoo.redirect_uri}`;
-  res.redirect(yahooAuthUrl);
+  return res.redirect(
+    `${config.frontend.url}/dashboard?token=${accessToken}&success=Microsoft authentication successful`
+  );
 });
 
 const yahooCallback = catchAsync(async (req: Request, res: Response) => {
@@ -142,23 +154,21 @@ const yahooCallback = catchAsync(async (req: Request, res: Response) => {
 
     console.log('Yahoo auth successful, setting cookies');
     res.cookie('accessToken', result.accessToken, {
-      httpOnly: true,
-      secure: config.node_env === 'production',
-      sameSite: config.node_env === 'production' ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      ...config.cookies,
+      sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
     });
-
     if (result.refreshToken) {
       res.cookie('refreshToken', result.refreshToken, {
-        httpOnly: true,
-        secure: config.node_env === 'production',
-        sameSite: config.node_env === 'production' ? 'none' : 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        ...config.cookies,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
+        sameSite: config.node_env === 'production' ? 'none' : 'lax' as const,
       });
     }
 
     console.log('Auth cookies set, redirecting to dashboard');
-    return res.redirect(`${config.frontend.url}/dashboard`);
+    return res.redirect(
+      `${config.frontend.url}/dashboard?token=${result.accessToken}&success=Yahoo authentication successful`
+    );
   } catch (error) {
     console.log(
       'Yahoo auth failed:',
@@ -171,6 +181,59 @@ const yahooCallback = catchAsync(async (req: Request, res: Response) => {
     );
   }
 });
+
+const yahooLogin = catchAsync(async (req: Request, res: Response) => {
+  console.log('Initiating Yahoo login');
+  const yahooAuthUrl = `https://api.login.yahoo.com/oauth2/request_auth?client_id=${config.oauth.yahoo.client_id}&response_type=code&redirect_uri=${config.oauth.yahoo.redirect_uri}&scope=openid email profile mail-r`;
+  res.redirect(yahooAuthUrl);
+});
+
+// const yahooCallback = catchAsync(async (req: Request, res: Response) => {
+//   const { code } = req.query;
+//   console.log('Yahoo callback triggered, code:', code);
+//   if (!code) {
+//     console.log('Authorization code missing');
+//     return res.redirect(
+//       `${config.frontend.url}/login?error=Authorization code missing`
+//     );
+//   }
+
+//   try {
+//     const result = await UserService.yahooLoginIntoDB({
+//       code: code.toString(),
+//     });
+
+//     console.log('Yahoo auth successful, setting cookies');
+//     res.cookie('accessToken', result.accessToken, {
+//       httpOnly: true,
+//       secure: config.node_env === 'production',
+//       sameSite: config.node_env === 'production' ? 'none' : 'lax',
+//       maxAge: 24 * 60 * 60 * 1000, // 24 hours
+//     });
+
+//     if (result.refreshToken) {
+//       res.cookie('refreshToken', result.refreshToken, {
+//         httpOnly: true,
+//         secure: config.node_env === 'production',
+//         sameSite: config.node_env === 'production' ? 'none' : 'lax',
+//         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+//       });
+//     }
+
+//     console.log('Auth cookies set, redirecting to dashboard');
+//     return res.redirect(`${config.frontend.url}/dashboard`);
+//   } catch (error) {
+//     console.log(
+//       'Yahoo auth failed:',
+//       error instanceof Error ? error.message : 'Unknown error'
+//     );
+//     return res.redirect(
+//       `${config.frontend.url}/login?error=${encodeURIComponent(
+//         error instanceof Error ? error.message : 'Authentication failed'
+//       )}`
+//     );
+//   }
+// });
 
 const localLogin = catchAsync(async (req: Request, res: Response) => {
   console.log('Local login attempt:', req.body.email);
@@ -311,4 +374,5 @@ export const UserController = {
   getCurrentUser,
   updateProfile,
   updateSubscription,
+  fetchEmails,
 };

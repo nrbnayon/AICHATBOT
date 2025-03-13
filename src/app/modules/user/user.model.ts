@@ -1,3 +1,4 @@
+// src/app/modules/user/user.model.ts
 import { model, Schema } from 'mongoose';
 import bcrypt from 'bcrypt';
 import {
@@ -9,6 +10,7 @@ import {
 } from '../../../enums/common';
 import { IUser, UserModel } from './user.interface';
 import config from '../../../config';
+import { encryptionHelper } from '../../../helpers/encryptionHelper';
 
 const userSubscriptionSchema = new Schema({
   plan: {
@@ -97,8 +99,46 @@ userSchema.pre('save', async function (next) {
       config.security.bcrypt_salt_rounds
     );
   }
+
+  // Encrypt sensitive data
+  if (this.isModified('googleAccessToken') && this.googleAccessToken) {
+    this.googleAccessToken = encryptionHelper.encrypt(this.googleAccessToken);
+  }
+  if (this.isModified('microsoftAccessToken') && this.microsoftAccessToken) {
+    this.microsoftAccessToken = encryptionHelper.encrypt(
+      this.microsoftAccessToken
+    );
+  }
+  if (this.isModified('yahooAccessToken') && this.yahooAccessToken) {
+    this.yahooAccessToken = encryptionHelper.encrypt(this.yahooAccessToken);
+  }
+  if (this.isModified('refreshToken') && this.refreshToken) {
+    this.refreshToken = encryptionHelper.encrypt(this.refreshToken);
+  }
+
   next();
 });
+
+// Decrypt sensitive data when fetching
+userSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  if (obj.googleAccessToken) {
+    obj.googleAccessToken = encryptionHelper.decrypt(obj.googleAccessToken);
+  }
+  if (obj.microsoftAccessToken) {
+    obj.microsoftAccessToken = encryptionHelper.decrypt(
+      obj.microsoftAccessToken
+    );
+  }
+  if (obj.yahooAccessToken) {
+    obj.yahooAccessToken = encryptionHelper.decrypt(obj.yahooAccessToken);
+  }
+  if (obj.refreshToken) {
+    obj.refreshToken = encryptionHelper.decrypt(obj.refreshToken);
+  }
+  delete obj.password;
+  return obj;
+};
 
 userSchema.statics.isExistUserById = async function (
   id: string

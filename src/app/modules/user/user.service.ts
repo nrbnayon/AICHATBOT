@@ -118,6 +118,93 @@ const handleOAuthCallback = async (
   };
 };
 
+const fetchGmailEmails = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user || !user.googleAccessToken) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Google account not linked');
+  }
+
+  try {
+    const response = await axios.get(
+      'https://www.googleapis.com/gmail/v1/users/me/messages',
+      {
+        headers: {
+          Authorization: `Bearer ${user.googleAccessToken}`,
+        },
+        params: {
+          maxResults: 10, // Fetch 10 emails, adjust as needed
+        },
+      }
+    );
+
+    return response.data.messages;
+  } catch (error) {
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      'Failed to fetch Gmail emails. Token may be expired or invalid.'
+    );
+  }
+};
+
+// Function to fetch Outlook emails
+const fetchOutlookEmails = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user || !user.microsoftAccessToken) {
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      'Microsoft account not linked'
+    );
+  }
+
+  try {
+    const response = await axios.get(
+      'https://graph.microsoft.com/v1.0/me/messages',
+      {
+        headers: {
+          Authorization: `Bearer ${user.microsoftAccessToken}`,
+        },
+        params: {
+          $top: 10, // Fetch 10 emails, adjust as needed
+        },
+      }
+    );
+
+    return response.data.value;
+  } catch (error) {
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      'Failed to fetch Outlook emails. Token may be expired or invalid.'
+    );
+  }
+};
+
+// Function to fetch Yahoo emails
+const fetchYahooEmails = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user || !user.yahooAccessToken) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Yahoo account not linked');
+  }
+
+  try {
+    const response = await axios.get('https://api.yahoo.com/mail/v1/messages', {
+      headers: {
+        Authorization: `Bearer ${user.yahooAccessToken}`,
+      },
+      params: {
+        count: 10, // Fetch 10 emails, adjust as needed
+      },
+    });
+
+    return response.data.messages;
+  } catch (error) {
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      'Failed to fetch Yahoo emails. Token may be expired or invalid.'
+    );
+  }
+};
+
+// Update yahooLoginIntoDB to request email access scope
 const yahooLoginIntoDB = async ({
   code,
 }: {
@@ -141,7 +228,7 @@ const yahooLoginIntoDB = async ({
       }
     );
 
-    const { access_token } = tokenResponse.data;
+    const { access_token, refresh_token } = tokenResponse.data;
 
     // Get user info from Yahoo
     const userResponse = await axios.get(
@@ -164,6 +251,7 @@ const yahooLoginIntoDB = async ({
         name: yahooUser.name,
         yahooId: yahooUser.sub,
         yahooAccessToken: access_token,
+        refreshToken: refresh_token,
         authProvider: AUTH_PROVIDER.YAHOO,
         role: USER_ROLES.USER,
         verified: true,
@@ -172,6 +260,7 @@ const yahooLoginIntoDB = async ({
     } else {
       user.yahooId = yahooUser.sub;
       user.yahooAccessToken = access_token;
+      user.refreshToken = refresh_token;
       user.authProvider = AUTH_PROVIDER.YAHOO;
       await user.save();
     }
@@ -217,7 +306,6 @@ const yahooLoginIntoDB = async ({
     );
   }
 };
-
 
 const localLoginIntoDB = async (payload: {
   email: string;
@@ -354,4 +442,7 @@ export const UserService = {
   getCurrentUser,
   updateProfile,
   updateSubscription,
+  fetchGmailEmails,
+  fetchOutlookEmails,
+  fetchYahooEmails,
 };
