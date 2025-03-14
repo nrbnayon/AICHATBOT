@@ -48,9 +48,15 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
     config.jwt.refresh_expires_in
   );
 
-  res.cookie('accessToken', accessToken, cookieHelper.getAccessTokenOptions());
+  safeCookie.set(
+    res,
+    'accessToken',
+    accessToken,
+    cookieHelper.getAccessTokenOptions()
+  );
 
-  res.cookie(
+  safeCookie.set(
+    res,
     'refreshToken',
     refreshToken,
     cookieHelper.getRefreshTokenOptions()
@@ -101,9 +107,15 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
     config.jwt.refresh_expires_in
   );
 
-  res.cookie('accessToken', accessToken, cookieHelper.getAccessTokenOptions());
+  safeCookie.set(
+    res,
+    'accessToken',
+    accessToken,
+    cookieHelper.getAccessTokenOptions()
+  );
 
-  res.cookie(
+  safeCookie.set(
+    res,
     'refreshToken',
     refreshToken,
     cookieHelper.getRefreshTokenOptions()
@@ -137,14 +149,16 @@ const yahooCallback = catchAsync(async (req: Request, res: Response) => {
 
     console.log('Yahoo auth successful, setting cookies');
 
-    res.cookie(
+    safeCookie.set(
+      res,
       'accessToken',
       result.accessToken,
       cookieHelper.getAccessTokenOptions()
     );
 
     if (result.refreshToken) {
-      res.cookie(
+      safeCookie.set(
+        res,
         'refreshToken',
         result.refreshToken,
         cookieHelper.getRefreshTokenOptions()
@@ -182,7 +196,6 @@ const localLogin = catchAsync(async (req: Request, res: Response) => {
 
   console.log('Local login successful, setting cookies');
 
-  // Use cookieHelper consistently
   safeCookie.set(
     res,
     'accessToken',
@@ -218,8 +231,9 @@ const logout = catchAsync(async (req: Request, res: Response) => {
 
   console.log('Clearing auth cookies');
 
-  res.clearCookie('accessToken', cookieHelper.getAccessTokenOptions());
-  res.clearCookie('refreshToken', cookieHelper.getRefreshTokenOptions());
+  safeCookie.clear(res, 'accessToken', cookieHelper.getAccessTokenOptions());
+
+  safeCookie.clear(res, 'refreshToken', cookieHelper.getRefreshTokenOptions());
 
   console.log('Logout successful');
   sendResponse(res, {
@@ -250,7 +264,8 @@ const refreshToken = catchAsync(async (req: Request, res: Response) => {
 
   console.log('Setting new access token cookie');
 
-  res.cookie(
+  safeCookie.set(
+    res,
     'accessToken',
     result.accessToken,
     cookieHelper.getAccessTokenOptions()

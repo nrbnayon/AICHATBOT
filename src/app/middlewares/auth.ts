@@ -6,7 +6,7 @@ import ApiError from '../../errors/ApiError';
 import { jwtHelper } from '../../helpers/jwtHelper';
 import { User } from '../modules/user/user.model';
 import { AUTH_PROVIDER, USER_ROLES, USER_STATUS } from '../../enums/common';
-import { cookieHelper } from '../../helpers/cookieHelper';
+import { cookieHelper, safeCookie } from '../../helpers/cookieHelper';
 
 // Consider using a proper logger instead of console.log for production
 const logger = {
@@ -228,7 +228,8 @@ export const setRefreshedTokenCookie = (
   const authReq = req as AuthRequest;
 
   if (authReq.tokenRefreshed && authReq.newAccessToken) {
-    res.cookie(
+    safeCookie.set(
+      res,
       'accessToken',
       authReq.newAccessToken,
       cookieHelper.getAccessTokenOptions()
