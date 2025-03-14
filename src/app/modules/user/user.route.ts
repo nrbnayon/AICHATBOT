@@ -1,6 +1,6 @@
 import express from 'express';
 import { UserController } from './user.controller';
-import auth from '../../middlewares/auth';
+import auth, { setRefreshedTokenCookie } from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { UserValidation } from './user.validation';
 import { USER_ROLES } from '../../../enums/common';
@@ -70,12 +70,19 @@ router.post(
   UserController.refreshToken
 );
 
-router.post('/logout', auth(), apiLimiter, UserController.logout);
+router.post(
+  '/logout',
+  auth(),
+  setRefreshedTokenCookie,
+  apiLimiter,
+  UserController.logout
+);
 
 // Protected Routes
 router.get(
   '/me',
   auth(USER_ROLES.USER, USER_ROLES.ADMIN),
+  setRefreshedTokenCookie, // Add the middleware to set refreshed token cookies
   apiLimiter,
   UserController.getCurrentUser
 );
@@ -83,6 +90,7 @@ router.get(
 router.patch(
   '/profile',
   auth(USER_ROLES.USER, USER_ROLES.ADMIN),
+  setRefreshedTokenCookie,
   apiLimiter,
   validateRequest(UserValidation.updateProfileSchema),
   UserController.updateProfile
@@ -91,17 +99,10 @@ router.patch(
 router.patch(
   '/subscription',
   auth(USER_ROLES.USER),
+  setRefreshedTokenCookie,
   apiLimiter,
   validateRequest(UserValidation.updateSubscriptionSchema),
   UserController.updateSubscription
 );
-
-// Email Access Routes
-// router.get(
-//   '/emails',
-//   // auth(USER_ROLES.USER, USER_ROLES.ADMIN),
-//   apiLimiter,
-//   UserController.fetchEmails
-// );
 
 export const UserRoutes = router;

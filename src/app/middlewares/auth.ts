@@ -6,6 +6,7 @@ import ApiError from '../../errors/ApiError';
 import { jwtHelper } from '../../helpers/jwtHelper';
 import { User } from '../modules/user/user.model';
 import { AUTH_PROVIDER, USER_ROLES, USER_STATUS } from '../../enums/common';
+import { cookieHelper } from '../../helpers/cookieHelper';
 
 // Consider using a proper logger instead of console.log for production
 const logger = {
@@ -25,6 +26,8 @@ export interface AuthRequest extends Request {
     name: string;
     authProvider?: AUTH_PROVIDER;
   };
+  tokenRefreshed?: boolean;
+  newAccessToken?: string;
 }
 
 const auth =
@@ -38,8 +41,6 @@ const auth =
           ? req.headers.authorization.substring(7)
           : undefined);
 
-      const accessTok = req.params;
-      console.log('Get token from cookie', accessTok);
       logger.info('Auth middleware - Token present:', {
         hasToken: !!accessToken,
         from: {
@@ -178,22 +179,17 @@ const auth =
               userId: user._id.toString(),
             });
 
-            // Set new access token in cookie
-            res.cookie('accessToken', accessToken, {
-              httpOnly: true,
-              secure: process.env.NODE_ENV === 'production',
-              sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-              maxAge: 2 * 60 * 60 * 1000, // 24 h
-            });
-
-            // Attach user info to request
-            (req as AuthRequest).user = {
+            // Attach user info and token refresh flag to request
+            const authReq = req as AuthRequest;
+            authReq.user = {
               userId: user._id.toString(),
               role: user.role,
               email: user.email,
               name: user.name,
               authProvider: user.authProvider,
             };
+            authReq.tokenRefreshed = true;
+            authReq.newAccessToken = newAccessToken;
 
             logger.info('User authenticated with refresh token', {
               userId: user._id.toString(),
@@ -222,5 +218,25 @@ const auth =
       next(error);
     }
   };
+
+// New middleware to set the refreshed token cookie after authentication
+export const setRefreshedTokenCookie = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const authReq = req as AuthRequest;
+
+  if (authReq.tokenRefreshed && authReq.newAccessToken) {
+    res.cookie(
+      'accessToken',
+      authReq.newAccessToken,
+      cookieHelper.getAccessTokenOptions()
+    );
+    logger.info('Refreshed access token cookie set');
+  }
+
+  next();
+};
 
 export default auth;

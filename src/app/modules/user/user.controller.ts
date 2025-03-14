@@ -7,70 +7,7 @@ import { UserService } from './user.service';
 import config from '../../../config';
 import { AuthRequest } from '../../middlewares/auth';
 import { jwtHelper } from '../../../helpers/jwtHelper';
-import ApiError from '../../../errors/ApiError';
-
-// Explicitly type cookieOptions to match Express CookieOptions
-interface CookieOptions {
-  httpOnly: boolean;
-  secure: true;
-  sameSite: 'none';
-  maxAge?: number;
-}
-const setCookies = (
-  res: Response,
-  accessToken: string,
-  refreshToken?: string
-) => {
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
-
-  res.cookie('accessToken', accessToken, {
-    ...cookieOptions,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  });
-
-  if (refreshToken) {
-    res.cookie('refreshToken', refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
-  }
-};
-const fetchEmails = catchAsync(async (req: Request, res: Response) => {
-  const authReq = req as AuthRequest;
-  const userId = authReq.user?.userId;
-
-  // Get provider from user record, not from query parameter
-  const user = await UserService.getCurrentUser(userId);
-  const provider = user.authProvider;
-
-  console.log("Getting emails from user's provider:", provider);
-
-  let emails;
-  switch (provider) {
-    case 'google':
-      emails = await UserService.fetchGmailEmails(userId);
-      break;
-    case 'microsoft':
-      emails = await UserService.fetchOutlookEmails(userId);
-      break;
-    case 'yahoo':
-      emails = await UserService.fetchYahooEmails(userId);
-      break;
-    default:
-      throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid provider');
-  }
-
-  sendResponse(res, {
-    success: true,
-    statusCode: StatusCodes.OK,
-    message: `Emails fetched successfully from ${provider}`,
-    data: emails,
-  });
-});
+import { cookieHelper, safeCookie } from '../../../helpers/cookieHelper';
 
 const googleCallback = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
@@ -111,24 +48,13 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
     config.jwt.refresh_expires_in
   );
 
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
+  res.cookie('accessToken', accessToken, cookieHelper.getAccessTokenOptions());
 
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours,
-  });
-
-  res.cookie('refreshToken', refreshToken, {
-    ...cookieOptions,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  });
+  res.cookie(
+    'refreshToken',
+    refreshToken,
+    cookieHelper.getRefreshTokenOptions()
+  );
 
   console.log('Auth cookies set, redirecting to dashboard');
   return res.redirect(
@@ -175,24 +101,13 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
     config.jwt.refresh_expires_in
   );
 
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
+  res.cookie('accessToken', accessToken, cookieHelper.getAccessTokenOptions());
 
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours,
-  });
-
-  res.cookie('refreshToken', refreshToken, {
-    ...cookieOptions,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  });
+  res.cookie(
+    'refreshToken',
+    refreshToken,
+    cookieHelper.getRefreshTokenOptions()
+  );
 
   console.log('Auth cookies set, redirecting to dashboard');
   return res.redirect(
@@ -222,25 +137,18 @@ const yahooCallback = catchAsync(async (req: Request, res: Response) => {
 
     console.log('Yahoo auth successful, setting cookies');
 
-    const cookieOptions: CookieOptions = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-    };
-
-    res.cookie('accessToken', result.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+    res.cookie(
+      'accessToken',
+      result.accessToken,
+      cookieHelper.getAccessTokenOptions()
+    );
 
     if (result.refreshToken) {
-      res.cookie('refreshToken', result.refreshToken, {
-        ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      });
+      res.cookie(
+        'refreshToken',
+        result.refreshToken,
+        cookieHelper.getRefreshTokenOptions()
+      );
     }
 
     console.log('Auth cookies set, redirecting to dashboard');
@@ -273,24 +181,23 @@ const localLogin = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.localLoginIntoDB(req.body);
 
   console.log('Local login successful, setting cookies');
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
 
-  res.cookie('accessToken', result.accessToken, {
-    ...cookieOptions,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  });
+  // Use cookieHelper consistently
+  safeCookie.set(
+    res,
+    'accessToken',
+    result.accessToken,
+    cookieHelper.getAccessTokenOptions()
+  );
 
   if (result.refreshToken) {
-    res.cookie('refreshToken', result.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    safeCookie.set(
+      res,
+      'refreshToken',
+      result.refreshToken,
+      cookieHelper.getRefreshTokenOptions()
+    );
   }
-
   console.log('Local login response sent');
   sendResponse(res, {
     success: true,
@@ -310,14 +217,9 @@ const logout = catchAsync(async (req: Request, res: Response) => {
   await UserService.logout(authReq.user?.userId);
 
   console.log('Clearing auth cookies');
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
 
-  res.clearCookie('accessToken', cookieOptions);
-  res.clearCookie('refreshToken', cookieOptions);
+  res.clearCookie('accessToken', cookieHelper.getAccessTokenOptions());
+  res.clearCookie('refreshToken', cookieHelper.getRefreshTokenOptions());
 
   console.log('Logout successful');
   sendResponse(res, {
@@ -347,16 +249,12 @@ const refreshToken = catchAsync(async (req: Request, res: Response) => {
   const result = await UserService.refreshToken(refreshToken);
 
   console.log('Setting new access token cookie');
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  };
 
-  res.cookie('accessToken', result.accessToken, {
-    ...cookieOptions,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-  });
+  res.cookie(
+    'accessToken',
+    result.accessToken,
+    cookieHelper.getAccessTokenOptions()
+  );
 
   console.log('Token refresh successful');
   sendResponse(res, {
@@ -410,5 +308,4 @@ export const UserController = {
   getCurrentUser,
   updateProfile,
   updateSubscription,
-  fetchEmails,
 };

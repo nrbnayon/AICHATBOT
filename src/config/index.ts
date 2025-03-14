@@ -55,8 +55,8 @@ export default {
     path: '/',
     domain:
       process.env.NODE_ENV === 'production'
-        ? process.env.COOKIE_DOMAIN || process.env.FRONTEND_LIVE_URL
-        : process.env.FRONTEND_URL || undefined,
+        ? process.env.COOKIE_DOMAIN
+        : undefined,
   },
 
   oauth: {

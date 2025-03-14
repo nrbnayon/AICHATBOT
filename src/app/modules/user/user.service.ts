@@ -115,6 +115,7 @@ const handleOAuthCallback = async (
       name: user.name,
       role: user.role,
       image: user.image,
+      authProvider: user.authProvider,
     },
   };
 };
@@ -132,91 +133,6 @@ const handleOAuthError = (error: any, provider: string): never => {
     StatusCodes.INTERNAL_SERVER_ERROR,
     `${provider} authentication error`
   );
-};
-const fetchGmailEmails = async (userId: string) => {
-  const user = await User.findById(userId);
-  if (!user || !user.googleAccessToken) {
-    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Google account not linked');
-  }
-
-  try {
-    const response = await axios.get(
-      'https://www.googleapis.com/gmail/v1/users/me/messages',
-      {
-        headers: {
-          Authorization: `Bearer ${user.googleAccessToken}`,
-        },
-        params: {
-          maxResults: 10, // Fetch 10 emails, adjust as needed
-        },
-      }
-    );
-
-    return response.data.messages;
-  } catch (error) {
-    throw new ApiError(
-      StatusCodes.UNAUTHORIZED,
-      'Failed to fetch Gmail emails. Token may be expired or invalid.'
-    );
-  }
-};
-
-// Function to fetch Outlook emails
-const fetchOutlookEmails = async (userId: string) => {
-  const user = await User.findById(userId);
-  if (!user || !user.microsoftAccessToken) {
-    throw new ApiError(
-      StatusCodes.UNAUTHORIZED,
-      'Microsoft account not linked'
-    );
-  }
-
-  try {
-    const response = await axios.get(
-      'https://graph.microsoft.com/v1.0/me/messages',
-      {
-        headers: {
-          Authorization: `Bearer ${user.microsoftAccessToken}`,
-        },
-        params: {
-          $top: 10, // Fetch 10 emails, adjust as needed
-        },
-      }
-    );
-
-    return response.data.value;
-  } catch (error) {
-    throw new ApiError(
-      StatusCodes.UNAUTHORIZED,
-      'Failed to fetch Outlook emails. Token may be expired or invalid.'
-    );
-  }
-};
-
-// Function to fetch Yahoo emails
-const fetchYahooEmails = async (userId: string) => {
-  const user = await User.findById(userId);
-  if (!user || !user.yahooAccessToken) {
-    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Yahoo account not linked');
-  }
-
-  try {
-    const response = await axios.get('https://api.yahoo.com/mail/v1/messages', {
-      headers: {
-        Authorization: `Bearer ${user.yahooAccessToken}`,
-      },
-      params: {
-        count: 10, // Fetch 10 emails, adjust as needed
-      },
-    });
-
-    return response.data.messages;
-  } catch (error) {
-    throw new ApiError(
-      StatusCodes.UNAUTHORIZED,
-      'Failed to fetch Yahoo emails. Token may be expired or invalid.'
-    );
-  }
 };
 
 // Update yahooLoginIntoDB to request email access scope
@@ -458,8 +374,5 @@ export const UserService = {
   logout,
   getCurrentUser,
   updateProfile,
-  updateSubscription,
-  fetchGmailEmails,
-  fetchOutlookEmails,
-  fetchYahooEmails,
+  updateSubscription
 };
