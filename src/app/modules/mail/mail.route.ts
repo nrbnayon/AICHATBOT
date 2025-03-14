@@ -38,6 +38,25 @@ router.post(
   MailController.trashEmail
 );
 router.post(
+  '/emails/:id/archive',
+  auth(USER_ROLES.USER),
+  apiLimiter,
+  MailController.archiveEmail
+);
+router.post(
+  '/emails/:id/reply',
+  auth(USER_ROLES.USER),
+  apiLimiter,
+  upload.array('attachments'),
+  MailController.replyToEmail
+);
+router.get(
+  '/emails/search',
+  auth(USER_ROLES.USER),
+  apiLimiter,
+  MailController.searchEmails
+);
+router.post(
   '/emails/:id/markRead',
   auth(USER_ROLES.USER),
   apiLimiter,
@@ -70,4 +89,10 @@ router.get(
   MailController.listTools
 );
 
+router.get(
+  '/emails/:id/summary',
+  auth(USER_ROLES.USER),
+  apiLimiter,
+  MailController.summarizeEmail
+);
 export const MailRoutes = router;
