@@ -12,30 +12,43 @@ import config from './config';
 
 const app = express();
 
-// Morgan
+// Morgan logging
 app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
-// Enhanced CORS configuration
-app.use(
-  cors({
-    origin: 'http://localhost:5173', // Use config for consistency
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'Access-Control-Allow-Credentials',
-      'Access-Control-Allow-Origin',
-    ],
-    exposedHeaders: ['set-cookie'],
-  })
-);
+// Define CORS options
+const corsOptions = {
+  origin: (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
+    const allowedOrigins = [
+      config.frontend.url,
+      'http://localhost:5173',
+      '192.168.10.206',
+    ];
 
-// Handle preflight requests
-app.options('*', cors());
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Access-Control-Allow-Credentials',
+    'Access-Control-Allow-Origin',
+  ],
+  exposedHeaders: ['set-cookie'],
+};
 
-// Session middleware (optional, consider removing if using JWTs only)
+// Apply CORS configuration once
+app.use(cors(corsOptions));
+
+// Session middleware
 app.use(
   session({
     secret: config.jwt.secret || 'your-session-secret',
@@ -44,26 +57,33 @@ app.use(
     cookie: {
       secure: config.cookies.secure,
       httpOnly: config.cookies.httpOnly,
-      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict',
-    }, // Use config for consistency
+      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict' | undefined,
+      maxAge: config.cookies.maxAge,
+      path: config.cookies.path,
+      domain: config.cookies.domain,
+    },
   })
 );
 
+// Apply response interceptor
 app.use(responseInterceptor);
 
+// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Serve static files
 app.use(express.static('uploads'));
 
+// Passport initialization
 app.use(passport.initialize());
 app.use(passport.session());
 
+// API routes
 app.use('/api/v1', router);
 
 // Home route - serving the HTML content
 app.get('/', (req: Request, res: Response) => {
-  console.log('Home route accessed');
   res.send(`
 <!DOCTYPE html>
 <html lang="en">

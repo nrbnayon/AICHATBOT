@@ -1,6 +1,5 @@
-// src/app/modules/user/user.route.ts
-import { UserController } from './user.controller';
 import express from 'express';
+import { UserController } from './user.controller';
 import auth from '../../middlewares/auth';
 import validateRequest from '../../middlewares/validateRequest';
 import { UserValidation } from './user.validation';
@@ -23,7 +22,7 @@ router.get(
       'email',
       'https://www.googleapis.com/auth/gmail.readonly',
     ],
-    session: true,
+    session: false, // Using stateless JWT auth
   })
 );
 
@@ -31,7 +30,7 @@ router.get(
   '/google/callback',
   passport.authenticate('google', {
     failureRedirect: `${config.frontend.url}/login?error=Google authentication failed`,
-    session: true,
+    session: false,
   }),
   UserController.googleCallback
 );
@@ -40,7 +39,7 @@ router.get(
   '/microsoft/login',
   passport.authenticate('microsoft', {
     scope: ['user.read', 'Mail.Read'],
-    session: true,
+    session: false,
   })
 );
 
@@ -48,7 +47,7 @@ router.get(
   '/microsoft/callback',
   passport.authenticate('microsoft', {
     failureRedirect: `${config.frontend.url}/login?error=Microsoft authentication failed`,
-    session: true,
+    session: false,
   }),
   UserController.microsoftCallback
 );
@@ -98,11 +97,11 @@ router.patch(
 );
 
 // Email Access Routes
-router.get(
-  '/emails',
-  auth(USER_ROLES.USER, USER_ROLES.ADMIN),
-  apiLimiter,
-  UserController.fetchEmails
-);
+// router.get(
+//   '/emails',
+//   // auth(USER_ROLES.USER, USER_ROLES.ADMIN),
+//   apiLimiter,
+//   UserController.fetchEmails
+// );
 
 export const UserRoutes = router;

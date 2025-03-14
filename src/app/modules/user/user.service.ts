@@ -99,6 +99,7 @@ const handleOAuthCallback = async (
     role: user.role,
     email: user.email,
     name: user.name,
+    authProvider: user.authProvider,
   };
   const jwtAccessToken = jwtHelper.createToken(
     jwtPayload,
@@ -117,7 +118,21 @@ const handleOAuthCallback = async (
     },
   };
 };
-
+const handleOAuthError = (error: any, provider: string): never => {
+  console.error(`${provider} OAuth error:`, error);
+  if (axios.isAxiosError(error)) {
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      `${provider} authentication failed: ${
+        error.response?.data?.error || error.message
+      }`
+    );
+  }
+  throw new ApiError(
+    StatusCodes.INTERNAL_SERVER_ERROR,
+    `${provider} authentication error`
+  );
+};
 const fetchGmailEmails = async (userId: string) => {
   const user = await User.findById(userId);
   if (!user || !user.googleAccessToken) {
@@ -272,6 +287,7 @@ const yahooLoginIntoDB = async ({
         role: user.role,
         email: user.email,
         name: user.name,
+        authProvider: user.authProvider,
       },
       config.jwt.secret,
       config.jwt.expire_in
@@ -283,6 +299,7 @@ const yahooLoginIntoDB = async ({
         role: user.role,
         email: user.email,
         name: user.name,
+        authProvider: user.authProvider,
       },
       config.jwt.refresh_secret,
       config.jwt.refresh_expires_in

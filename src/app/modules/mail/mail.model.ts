@@ -1,0 +1,1 @@
+// src\app\modules\mail\mail.model.ts

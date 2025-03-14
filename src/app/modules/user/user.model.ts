@@ -92,32 +92,50 @@ const userSchema = new Schema<IUser, UserModel>(
   }
 );
 
+// In pre-save hook, add error handling
 userSchema.pre('save', async function (next) {
-  if (this.isModified('password') && this.password) {
-    this.password = await bcrypt.hash(
-      this.password,
-      config.security.bcrypt_salt_rounds
-    );
-  }
+  try {
+    if (this.isModified('password') && this.password) {
+      this.password = await bcrypt.hash(
+        this.password,
+        config.security.bcrypt_salt_rounds
+      );
+    }
 
-  // Encrypt sensitive data
-  if (this.isModified('googleAccessToken') && this.googleAccessToken) {
-    this.googleAccessToken = encryptionHelper.encrypt(this.googleAccessToken);
-  }
-  if (this.isModified('microsoftAccessToken') && this.microsoftAccessToken) {
-    this.microsoftAccessToken = encryptionHelper.encrypt(
-      this.microsoftAccessToken
-    );
-  }
-  if (this.isModified('yahooAccessToken') && this.yahooAccessToken) {
-    this.yahooAccessToken = encryptionHelper.encrypt(this.yahooAccessToken);
-  }
-  if (this.isModified('refreshToken') && this.refreshToken) {
-    this.refreshToken = encryptionHelper.encrypt(this.refreshToken);
-  }
+    // Encrypt sensitive data
+    if (this.isModified('googleAccessToken') && this.googleAccessToken) {
+      this.googleAccessToken = encryptionHelper.encrypt(this.googleAccessToken);
+    }
+    if (this.isModified('microsoftAccessToken') && this.microsoftAccessToken) {
+      this.microsoftAccessToken = encryptionHelper.encrypt(
+        this.microsoftAccessToken
+      );
+    }
+    if (this.isModified('yahooAccessToken') && this.yahooAccessToken) {
+      this.yahooAccessToken = encryptionHelper.encrypt(this.yahooAccessToken);
+    }
+    if (this.isModified('refreshToken') && this.refreshToken) {
+      this.refreshToken = encryptionHelper.encrypt(this.refreshToken);
+    }
 
-  next();
+    next();
+  } catch (error) {
+    next(error as Error);
+  }
 });
+
+// Fix the decryption logic
+userSchema.methods.getDecryptedToken = function(tokenName: string) {
+  const encrypted = (this as any)[tokenName] as string;
+  if (!encrypted) return null;
+  
+  try {
+    return encryptionHelper.decrypt(encrypted);
+  } catch (error) {
+    console.error(`Failed to decrypt ${tokenName}:`, error);
+    return null;
+  }
+};
 
 // Decrypt sensitive data when fetching
 userSchema.methods.toJSON = function () {

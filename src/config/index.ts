@@ -20,6 +20,7 @@ export default {
 
   encryption: {
     key: process.env.ENCRYPTION_KEY,
+    salt: process.env.ENCRYPTION_SALT || 'salt',
   },
 
   database: {
@@ -47,11 +48,15 @@ export default {
   },
 
   cookies: {
-    secure:
-      process.env.NODE_ENV === 'production' ||
-      process.env.SECURE_COOKIES === 'true',
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Changed to 'lax' for local dev
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+    path: '/',
+    domain:
+      process.env.NODE_ENV === 'production'
+        ? process.env.COOKIE_DOMAIN || process.env.FRONTEND_LIVE_URL
+        : process.env.FRONTEND_URL || undefined,
   },
 
   oauth: {

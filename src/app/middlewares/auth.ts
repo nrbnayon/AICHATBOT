@@ -5,7 +5,17 @@ import config from '../../config';
 import ApiError from '../../errors/ApiError';
 import { jwtHelper } from '../../helpers/jwtHelper';
 import { User } from '../modules/user/user.model';
-import { USER_ROLES, USER_STATUS } from '../../enums/common';
+import { AUTH_PROVIDER, USER_ROLES, USER_STATUS } from '../../enums/common';
+
+// Consider using a proper logger instead of console.log for production
+const logger = {
+  info: (message: string, meta?: object) => {
+    console.log(`[INFO] ${message}`, meta || '');
+  },
+  error: (message: string, meta?: object) => {
+    console.error(`[ERROR] ${message}`, meta || '');
+  },
+};
 
 export interface AuthRequest extends Request {
   user: {
@@ -13,6 +23,7 @@ export interface AuthRequest extends Request {
     role: USER_ROLES;
     email: string;
     name: string;
+    authProvider?: AUTH_PROVIDER;
   };
 }
 
@@ -20,16 +31,22 @@ const auth =
   (...roles: USER_ROLES[]) =>
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Look for token in both cookies and Authorization header
+      // Extract token from cookie or authorization header
       const accessToken =
         req.cookies?.accessToken ||
         (req.headers.authorization?.startsWith('Bearer ')
           ? req.headers.authorization.substring(7)
           : undefined);
 
-      console.log('Auth middleware accessed, token present:', !!accessToken);
-      console.log('Cookies received:', req.cookies);
-      console.log('Authorization header:', req.headers.authorization);
+      const accessTok = req.params;
+      console.log('Get token from cookie', accessTok);
+      logger.info('Auth middleware - Token present:', {
+        hasToken: !!accessToken,
+        from: {
+          cookies: !!req.cookies?.accessToken,
+          headers: !!req.headers.authorization,
+        },
+      });
 
       if (!accessToken) {
         throw new ApiError(
@@ -45,14 +62,18 @@ const auth =
           role: USER_ROLES;
           email: string;
           name: string;
+          authProvider?: AUTH_PROVIDER;
         }>(accessToken, config.jwt.secret);
 
-        console.log('Token decoded successfully:', decoded);
+        logger.info('Token decoded successfully', {
+          userId: decoded.userId,
+          role: decoded.role,
+        });
 
         // Check if the user exists and is active
         const user = await User.findById(decoded.userId);
         if (!user || user.status !== USER_STATUS.ACTIVE) {
-          console.log('User check failed:', {
+          logger.error('User check failed', {
             userExists: !!user,
             userStatus: user?.status,
           });
@@ -64,30 +85,37 @@ const auth =
 
         // Check role permissions
         if (roles.length && !roles.includes(decoded.role)) {
-          console.log('Role check failed:', {
+          logger.error('Role check failed', {
             requiredRoles: roles,
             userRole: decoded.role,
           });
           throw new ApiError(
             StatusCodes.FORBIDDEN,
-            "You don't have permission to access this API"
+            "You don't have permission to access this resource"
           );
         }
 
         // Attach user info to request
-        (req as AuthRequest).user = decoded;
-        console.log('User authenticated successfully:', decoded);
+        (req as AuthRequest).user = {
+          userId: decoded.userId,
+          role: decoded.role,
+          email: decoded.email,
+          name: decoded.name,
+          authProvider: decoded.authProvider,
+        };
+
+        logger.info('User authenticated successfully', {
+          userId: decoded.userId,
+        });
         return next();
       } catch (error) {
-        console.log('Token verification failed:', (error as Error).message);
         // Handle expired access token
         if (error instanceof jwt.TokenExpiredError) {
+          logger.info('Access token expired, checking refresh token');
+
           const refreshToken = req.cookies?.refreshToken;
-          console.log(
-            'Access token expired, checking refresh token:',
-            !!refreshToken
-          );
           if (!refreshToken) {
+            logger.error('No refresh token available');
             throw new ApiError(
               StatusCodes.UNAUTHORIZED,
               'Refresh token required'
@@ -101,14 +129,17 @@ const auth =
               role: USER_ROLES;
               email: string;
               name: string;
+              authProvider?: AUTH_PROVIDER;
             }>(refreshToken, config.jwt.refresh_secret);
 
-            console.log('Refresh token decoded successfully:', decodedRefresh);
+            logger.info('Refresh token decoded successfully', {
+              userId: decodedRefresh.userId,
+            });
 
             // Check if the user exists and is active
             const user = await User.findById(decodedRefresh.userId);
             if (!user || user.status !== USER_STATUS.ACTIVE) {
-              console.log('User check with refresh token failed:', {
+              logger.error('User check with refresh token failed', {
                 userExists: !!user,
                 userStatus: user?.status,
               });
@@ -120,13 +151,13 @@ const auth =
 
             // Check role permissions
             if (roles.length && !roles.includes(user.role)) {
-              console.log('Role check with refresh token failed:', {
+              logger.error('Role check with refresh token failed', {
                 requiredRoles: roles,
                 userRole: user.role,
               });
               throw new ApiError(
                 StatusCodes.FORBIDDEN,
-                "You don't have permission to access this API"
+                "You don't have permission to access this resource"
               );
             }
 
@@ -137,19 +168,22 @@ const auth =
                 role: user.role,
                 email: user.email,
                 name: user.name,
+                authProvider: user.authProvider,
               },
               config.jwt.secret,
               config.jwt.expire_in
             );
 
-            console.log('New access token generated');
+            logger.info('New access token generated', {
+              userId: user._id.toString(),
+            });
 
             // Set new access token in cookie
-            res.cookie('accessToken', newAccessToken, {
+            res.cookie('accessToken', accessToken, {
               httpOnly: true,
-              secure: config.node_env === 'production',
-              sameSite: config.node_env === 'production' ? 'none' : 'lax',
-              maxAge: 24 * 60 * 60 * 1000, // 24 hours
+              secure: process.env.NODE_ENV === 'production',
+              sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+              maxAge: 2 * 60 * 60 * 1000, // 24 h
             });
 
             // Attach user info to request
@@ -158,28 +192,33 @@ const auth =
               role: user.role,
               email: user.email,
               name: user.name,
+              authProvider: user.authProvider,
             };
 
-            console.log(
-              'User authenticated with refresh token:',
-              decodedRefresh
-            );
+            logger.info('User authenticated with refresh token', {
+              userId: user._id.toString(),
+            });
             return next();
           } catch (refreshError) {
-            console.log(
-              'Refresh token verification failed:',
-              (refreshError as Error).message
-            );
+            logger.error('Refresh token verification failed', {
+              error: (refreshError as Error).message,
+            });
             throw new ApiError(
               StatusCodes.UNAUTHORIZED,
               'Invalid refresh token'
             );
           }
         }
+
+        logger.error('Token verification failed', {
+          error: (error as Error).message,
+        });
         throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid access token');
       }
     } catch (error) {
-      console.log('Authentication middleware error:', (error as Error).message);
+      logger.error('Authentication middleware error', {
+        error: (error as Error).message,
+      });
       next(error);
     }
   };

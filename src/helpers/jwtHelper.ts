@@ -9,6 +9,7 @@ interface TokenPayload {
   role: string;
   email?: string;
   name?: string;
+  authProvider?:string;
 }
 
 const createToken = (

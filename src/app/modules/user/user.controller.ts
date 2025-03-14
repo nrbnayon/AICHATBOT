@@ -1,3 +1,4 @@
+// src\app\modules\user\user.controller.ts
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import catchAsync from '../../../shared/catchAsync';
@@ -11,22 +12,42 @@ import ApiError from '../../../errors/ApiError';
 // Explicitly type cookieOptions to match Express CookieOptions
 interface CookieOptions {
   httpOnly: boolean;
-  secure: boolean;
-  sameSite: 'none' | 'lax' | 'strict';
+  secure: true;
+  sameSite: 'none';
   maxAge?: number;
 }
+const setCookies = (
+  res: Response,
+  accessToken: string,
+  refreshToken?: string
+) => {
+  const cookieOptions: CookieOptions = {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+  };
 
+  res.cookie('accessToken', accessToken, {
+    ...cookieOptions,
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  });
+
+  if (refreshToken) {
+    res.cookie('refreshToken', refreshToken, {
+      ...cookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+  }
+};
 const fetchEmails = catchAsync(async (req: Request, res: Response) => {
   const authReq = req as AuthRequest;
   const userId = authReq.user?.userId;
-  const provider = req.query.provider as string;
 
-  if (!provider || !['google', 'microsoft', 'yahoo'].includes(provider)) {
-    throw new ApiError(
-      StatusCodes.BAD_REQUEST,
-      'Invalid or missing provider parameter'
-    );
-  }
+  // Get provider from user record, not from query parameter
+  const user = await UserService.getCurrentUser(userId);
+  const provider = user.authProvider;
+
+  console.log("Getting emails from user's provider:", provider);
 
   let emails;
   switch (provider) {
@@ -72,6 +93,7 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
       role: user.role,
       email: user.email,
       name: user.name,
+      authProvider: user.authProvider,
     },
     config.jwt.secret,
     config.jwt.expire_in
@@ -83,6 +105,7 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
       role: user.role,
       email: user.email,
       name: user.name,
+      authProvider: user.authProvider,
     },
     config.jwt.refresh_secret,
     config.jwt.refresh_expires_in
@@ -90,13 +113,16 @@ const googleCallback = catchAsync(async (req: Request, res: Response) => {
 
   const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
+    secure: true,
+    sameSite: 'none',
   };
 
   res.cookie('accessToken', accessToken, {
-    ...cookieOptions,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours,
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -131,6 +157,7 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
       role: user.role,
       email: user.email,
       name: user.name,
+      authProvider: user.authProvider,
     },
     config.jwt.secret,
     config.jwt.expire_in
@@ -142,6 +169,7 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
       role: user.role,
       email: user.email,
       name: user.name,
+      authProvider: user.authProvider,
     },
     config.jwt.refresh_secret,
     config.jwt.refresh_expires_in
@@ -149,13 +177,16 @@ const microsoftCallback = catchAsync(async (req: Request, res: Response) => {
 
   const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
+    secure: true,
+    sameSite: 'none',
   };
 
   res.cookie('accessToken', accessToken, {
-    ...cookieOptions,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours,
   });
 
   res.cookie('refreshToken', refreshToken, {
@@ -193,13 +224,16 @@ const yahooCallback = catchAsync(async (req: Request, res: Response) => {
 
     const cookieOptions: CookieOptions = {
       httpOnly: true,
-      secure: config.node_env === 'production',
-      sameSite: config.node_env === 'production' ? 'none' : 'lax',
+      secure: true,
+      sameSite: 'none',
     };
 
     res.cookie('accessToken', result.accessToken, {
-      ...cookieOptions,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
+      maxAge: 24 * 60 * 60 * 1000,
     });
 
     if (result.refreshToken) {
@@ -241,8 +275,8 @@ const localLogin = catchAsync(async (req: Request, res: Response) => {
   console.log('Local login successful, setting cookies');
   const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
+    secure: true,
+    sameSite: 'none',
   };
 
   res.cookie('accessToken', result.accessToken, {
@@ -278,8 +312,8 @@ const logout = catchAsync(async (req: Request, res: Response) => {
   console.log('Clearing auth cookies');
   const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
+    secure: true,
+    sameSite: 'none',
   };
 
   res.clearCookie('accessToken', cookieOptions);
@@ -315,8 +349,8 @@ const refreshToken = catchAsync(async (req: Request, res: Response) => {
   console.log('Setting new access token cookie');
   const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: config.node_env === 'production',
-    sameSite: config.node_env === 'production' ? 'none' : 'lax',
+    secure: true,
+    sameSite: 'none',
   };
 
   res.cookie('accessToken', result.accessToken, {
