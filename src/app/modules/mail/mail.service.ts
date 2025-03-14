@@ -13,6 +13,9 @@ import fetch from 'node-fetch';
 import * as imap from 'imap-simple';
 import * as nodemailer from 'nodemailer';
 import { AUTH_PROVIDER } from '../../../enums/common';
+import { config } from 'dotenv';
+import { IUser } from '../user/user.interface';
+import { encryptionHelper } from '../../../helpers/encryptionHelper';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -238,6 +241,72 @@ const TOOLS: Tool[] = [
     },
   },
 ];
+
+const oauth2Client = new google.auth.OAuth2({
+  clientId: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  redirectUri: process.env.GOOGLE_REDIRECT_URI,
+});
+
+// src/app/modules/mail/mail.service.ts
+const getGoogleAuth = async (user: IUser) => {
+  const accessToken = user.googleAccessToken;
+  const refreshToken = user.refreshToken;
+  console.log('Google Auth - Token Info:', {
+    userId: user._id,
+    hasAccessToken: !!accessToken,
+    hasRefreshToken: !!refreshToken,
+    refreshToken,
+  });
+
+  oauth2Client.setCredentials({
+    access_token: decryptedAccessToken || undefined,
+    refresh_token: decryptedRefreshToken || undefined,
+  });
+
+  if (!decryptedRefreshToken) {
+    console.warn('No refresh token available for user:', user.email);
+    try {
+      await oauth2Client.getTokenInfo(decryptedAccessToken!);
+      console.log('Access token is still valid, proceeding without refresh.');
+      return oauth2Client;
+    } catch (error) {
+      console.error(
+        'Access token expired and no refresh token available:',
+        error
+      );
+      throw new ApiError(
+        StatusCodes.UNAUTHORIZED,
+        'Authentication expired. Please re-authenticate with Google.'
+      );
+    }
+  }
+
+  try {
+    const { credentials } = await oauth2Client.refreshAccessToken();
+    console.log('Token refreshed successfully:', {
+      newAccessToken: credentials.access_token ? 'present' : 'not present',
+      newRefreshToken: credentials.refresh_token ? 'present' : 'not present',
+    });
+    if (credentials.access_token) {
+      user.googleAccessToken = encryptionHelper.encrypt(
+        credentials.access_token
+      );
+      if (credentials.refresh_token) {
+        user.refreshToken = encryptionHelper.encrypt(credentials.refresh_token);
+      }
+      user.lastSync = new Date();
+      await user.save();
+    }
+    return oauth2Client;
+  } catch (error) {
+    console.error('Token refresh failed:', error.response?.data || error);
+    throw new ApiError(
+      StatusCodes.UNAUTHORIZED,
+      'Failed to refresh Google token'
+    );
+  }
+};
 
 // Mock Grok AI integration (replace with actual xAI API when available)
 // const mockGrokResponse = async (input: string): Promise<string> => {
@@ -1105,7 +1174,6 @@ class YahooService implements EmailService {
 }
 
 // Factory to create the appropriate email service
-// Inside createEmailService function in mail.service.ts
 const createEmailService = async (req: AuthRequest): Promise<EmailService> => {
   const user = await User.findById(req.user!.userId);
   if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
@@ -1115,20 +1183,25 @@ const createEmailService = async (req: AuthRequest): Promise<EmailService> => {
 
   switch (authProvider) {
     case AUTH_PROVIDER.GOOGLE: {
-      const oauth2Client = new google.auth.OAuth2();
-      oauth2Client.setCredentials({
-        access_token: user.googleAccessToken,
-        refresh_token: user.refreshToken,
-      });
-      return new GmailService(oauth2Client, userEmail);
+      const auth = await getGoogleAuth(user);
+      return new GmailService(auth, userEmail);
     }
     case AUTH_PROVIDER.MICROSOFT: {
-      return new OutlookService(user.microsoftAccessToken!, userEmail);
+      const decryptedAccessToken = encryptionHelper.decrypt(
+        user.microsoftAccessToken || ''
+      );
+      return new OutlookService(decryptedAccessToken, userEmail);
     }
     case AUTH_PROVIDER.YAHOO: {
+      const decryptedAccessToken = encryptionHelper.decrypt(
+        user.yahooAccessToken || ''
+      );
+      const decryptedRefreshToken = user.refreshToken
+        ? encryptionHelper.decrypt(user.refreshToken)
+        : '';
       return new YahooService(
-        user.yahooAccessToken!,
-        user.refreshToken!,
+        decryptedAccessToken,
+        decryptedRefreshToken,
         userEmail
       );
     }
@@ -1557,4 +1630,109 @@ export const listTools = async (req: AuthRequest) => {
   const emailService = await createEmailService(req);
   const mcpServer = new MCPServer(emailService);
   return mcpServer.listTools();
+};
+
+export const chatWithBot = async (
+  req: AuthRequest,
+  message: string
+): Promise<TextContent[]> => {
+  const emailService = await createEmailService(req);
+  const mcpServer = new MCPServer(emailService);
+  const user = await User.findById(req.user?.userId);
+  if (!user) throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+
+  const lowerMessage = message.toLowerCase();
+
+  // Action: Draft an email
+  if (lowerMessage.includes('draft an email')) {
+    const match = message.match(/to\s+([^ ]+)\s+about\s+(.+)/i);
+    if (match) {
+      const [, recipient, content] = match;
+      const recipientEmail = `${recipient}@example.com`;
+      const draft = await mcpServer.getPrompt('draft-email', {
+        recipient,
+        content,
+        recipient_email: recipientEmail,
+      });
+      req.session.lastDraft = {
+        recipient_id: recipientEmail,
+        subject: draft.messages[1].content.text
+          .split('\n')[0]
+          .replace('Subject: ', ''),
+        message: draft.messages[1].content.text.split('\n\n')[1],
+      };
+      return draft.messages.map(msg => msg.content);
+    }
+  }
+
+  // Action: Send an email (after draft approval)
+  if (
+    lowerMessage.includes('send the email') ||
+    lowerMessage.includes('yes, send it')
+  ) {
+    const lastDraft = (req.session as any)?.lastDraft; // Type assertion to handle dynamic session property
+    if (lastDraft) {
+      const sendResponse = await mcpServer.callTool('send-email', lastDraft);
+      delete (req.session as any).lastDraft; // Clear draft after sending with type assertion
+      return sendResponse;
+    }
+    return [
+      {
+        type: 'text',
+        text: 'No draft found to send. Please draft an email first.',
+      },
+    ];
+  }
+
+  // Action: Summarize latest email
+  if (lowerMessage.includes('summarize') && lowerMessage.includes('email')) {
+    const unreadEmails = await mcpServer.callTool('get-unread-emails');
+    const emails = unreadEmails[0].artifact?.data;
+    if (Array.isArray(emails) && emails.length > 0) {
+      const latestEmailId = emails[0].id;
+      const summary = await mcpServer.callTool('summarize-email', {
+        email_id: latestEmailId,
+      });
+      return summary;
+    }
+    return [{ type: 'text', text: 'No unread emails found to summarize.' }];
+  }
+
+  // Action: Read latest email
+  if (lowerMessage.includes('read') && lowerMessage.includes('email')) {
+    const unreadEmails = await mcpServer.callTool('get-unread-emails');
+    const emails = unreadEmails[0].artifact?.data;
+    if (Array.isArray(emails) && emails.length > 0) {
+      const latestEmailId = emails[0].id;
+      const emailContent = await mcpServer.callTool('read-email', {
+        email_id: latestEmailId,
+      });
+      return emailContent;
+    }
+    return [{ type: 'text', text: 'No unread emails found to read.' }];
+  }
+
+  // Action: Trash an email
+  if (lowerMessage.includes('trash') && lowerMessage.includes('email')) {
+    const match = message.match(/email\s+(\d+)/i);
+    const emailId = match ? match[1] : null;
+    if (emailId) {
+      const trashResponse = await mcpServer.callTool('trash-email', {
+        email_id: emailId,
+      });
+      return trashResponse;
+    }
+    return [
+      {
+        type: 'text',
+        text: 'Please specify an email ID to trash (e.g., "trash email 123").',
+      },
+    ];
+  }
+
+  // Default: Conversational response
+  const response = await groqResponse(
+    `User asked: "${message}". Respond helpfully and naturally, using your capabilities as an email assistant powered by Grok from xAI.`
+  );
+  return [{ type: 'text', text: response }];
 };

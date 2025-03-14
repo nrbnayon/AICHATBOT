@@ -125,12 +125,26 @@ userSchema.pre('save', async function (next) {
 });
 
 // Fix the decryption logic
-userSchema.methods.getDecryptedToken = function(tokenName: string) {
+// userSchema.methods.getDecryptedToken = function(tokenName: string) {
+//   const encrypted = (this as any)[tokenName] as string;
+//   if (!encrypted) return null;
+
+//   try {
+//     return encryptionHelper.decrypt(encrypted);
+//   } catch (error) {
+//     console.error(`Failed to decrypt ${tokenName}:`, error);
+//     return null;
+//   }
+// };
+
+userSchema.methods.getDecryptedToken = function (tokenName: string) {
   const encrypted = (this as any)[tokenName] as string;
+  console.log(`getDecryptedToken - Raw ${tokenName}:`, encrypted);
   if (!encrypted) return null;
-  
   try {
-    return encryptionHelper.decrypt(encrypted);
+    const decrypted = encryptionHelper.decrypt(encrypted);
+    console.log(`getDecryptedToken - Decrypted ${tokenName}:`, decrypted);
+    return decrypted;
   } catch (error) {
     console.error(`Failed to decrypt ${tokenName}:`, error);
     return null;

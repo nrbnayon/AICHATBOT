@@ -19,6 +19,7 @@ import {
   listPrompts,
   listTools,
   summarizeEmail,
+  chatWithBot,
 } from './mail.service';
 
 const fetchEmailsController = catchAsync(
@@ -195,6 +196,25 @@ const summarizeEmailController = catchAsync(
     });
   }
 );
+const chatWithBotController = catchAsync(
+  async (req: Request, res: Response) => {
+    const authReq = req as AuthRequest;
+    const { message } = req.body;
+    if (!message || typeof message !== 'string') {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Message is required and must be a string'
+      );
+    }
+    const response = await chatWithBot(authReq, message);
+    sendResponse(res, {
+      success: true,
+      statusCode: StatusCodes.OK,
+      message: 'Chat response generated',
+      data: response,
+    });
+  }
+);
 
 export const MailController = {
   fetchEmails: fetchEmailsController,
@@ -210,4 +230,5 @@ export const MailController = {
   listPrompts: listPromptsController,
   listTools: listToolsController,
   summarizeEmail: summarizeEmailController,
+  chatWithBot: chatWithBotController,
 };

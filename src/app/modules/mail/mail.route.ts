@@ -95,4 +95,10 @@ router.get(
   apiLimiter,
   MailController.summarizeEmail
 );
+router.post(
+  '/chat',
+  auth(USER_ROLES.USER),
+  apiLimiter,
+  MailController.chatWithBot
+);
 export const MailRoutes = router;

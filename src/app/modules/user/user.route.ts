@@ -23,6 +23,8 @@ router.get(
       'https://www.googleapis.com/auth/gmail.readonly',
     ],
     session: false, // Using stateless JWT auth
+    accessType: 'offline',
+    prompt: 'consent',
   })
 );
 
