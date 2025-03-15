@@ -1,6 +1,6 @@
 // src/app.ts
 import cors from 'cors';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import session from 'express-session';
 import { StatusCodes } from 'http-status-codes';
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
@@ -10,46 +10,138 @@ import responseInterceptor from './app/middlewares/responseInterceptor';
 import passport from './config/passport';
 import config from './config';
 
+
 const app = express();
 
 // Morgan logging
 app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
-// Define CORS options
-const corsOptions = {
-  origin: (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
-  ) => {
-    const allowedOrigins = [
-      config.frontend.url,
-      'http://localhost:5173',
-      'http://172.168.0.206:3000',
-      'http://192.168.10.206:5173',
-      'http://172.16.0.2:3000',
-      'http://172.16.0.2:5173',
-    ];
+// CORS Configuration based on environment
+const isDevelopment = process.env.NODE_ENV === 'development';
 
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Access-Control-Allow-Credentials',
-    'Access-Control-Allow-Origin',
-  ],
-  exposedHeaders: ['set-cookie'],
-};
+let corsOptions;
 
-// Apply CORS configuration once
+if (isDevelopment) {
+  // More permissive CORS for development
+  corsOptions = {
+    origin: true, // Allow any origin in development
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Access-Control-Allow-Credentials',
+      'Access-Control-Allow-Origin',
+    ],
+    exposedHeaders: ['set-cookie'],
+  };
+} else {
+  // Stricter CORS for production
+  corsOptions = {
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void
+    ) => {
+      const allowedOrigins = [
+        config.frontend.url,
+        'http://localhost:5173',
+        'http://172.168.0.206:3000',
+        'http://192.168.10.206:5173',
+        'http://172.16.0.2:3000',
+        'http://172.16.0.2:5173',
+        'http://192.168.10.206:5173/',
+        // Add any other production origins you need
+      ];
+
+      // For debugging
+      console.log(`CORS request from origin: ${origin}`);
+      console.log(`Allowed origins: ${allowedOrigins.join(', ')}`);
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.log(`CORS blocked for origin: ${origin}`);
+        callback(new Error(`CORS not allowed for origin: ${origin}`));
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Access-Control-Allow-Credentials',
+      'Access-Control-Allow-Origin',
+    ],
+    exposedHeaders: ['set-cookie'],
+  };
+}
+
+// Enable pre-flight across all routes
+app.options('*', cors(corsOptions));
+
+// Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Add CORS headers manually as backup - FIX THE TYPE ERROR HERE
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Handle OPTIONS requests separately
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH');
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, Access-Control-Allow-Credentials, Access-Control-Allow-Origin'
+    );
+    res.header('Access-Control-Allow-Credentials', 'true');
+
+    if (isDevelopment) {
+      res.header(
+        'Access-Control-Allow-Origin',
+        (req.headers.origin as string) || '*'
+      );
+    } else if (req.headers.origin) {
+      const allowedOrigins = [
+        config.frontend.url,
+        'http://localhost:5173',
+        'http://172.168.0.206:3000',
+        'http://192.168.10.206:5173',
+        'http://172.16.0.2:3000',
+        'http://172.16.0.2:5173',
+        'http://192.168.10.206:5173/',
+      ];
+
+      if (allowedOrigins.includes(req.headers.origin)) {
+        res.header('Access-Control-Allow-Origin', req.headers.origin);
+      }
+    }
+
+    return res.status(200).end();
+  }
+
+  // For non-OPTIONS requests
+  if (req.headers.origin) {
+    if (isDevelopment) {
+      res.header('Access-Control-Allow-Origin', req.headers.origin);
+    } else {
+      const allowedOrigins = [
+        config.frontend.url,
+        'http://localhost:5173',
+        'http://172.168.0.206:3000',
+        'http://192.168.10.206:5173',
+        'http://172.16.0.2:3000',
+        'http://172.16.0.2:5173',
+        'http://192.168.10.206:5173/',
+      ];
+
+      if (allowedOrigins.includes(req.headers.origin)) {
+        res.header('Access-Control-Allow-Origin', req.headers.origin);
+      }
+    }
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+
+  next();
+});
 
 // Session middleware
 app.use(
@@ -199,7 +291,7 @@ app.get('/', (req: Request, res: Response) => {
 app.use(globalErrorHandler);
 
 // Handle not found routes
-app.use((req, res) => {
+app.use((req: Request, res: Response) => {
   console.log('Route not found:', req.originalUrl);
   res.status(StatusCodes.NOT_FOUND).json({
     success: false,
