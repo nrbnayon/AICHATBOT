@@ -25,7 +25,8 @@ const corsOptions = {
     const allowedOrigins = [
       config.frontend.url,
       'http://localhost:5173',
-      '192.168.10.206',
+      'http://172.16.0.2:3000',
+      'http://192.168.10.33:5173',
     ];
 
     if (!origin || allowedOrigins.includes(origin)) {
@@ -57,7 +58,11 @@ app.use(
     cookie: {
       secure: config.cookies.secure,
       httpOnly: config.cookies.httpOnly,
-      sameSite: config.cookies.sameSite as 'none' | 'lax' | 'strict' | undefined,
+      sameSite: config.cookies.sameSite as
+        | 'none'
+        | 'lax'
+        | 'strict'
+        | undefined,
       maxAge: config.cookies.maxAge,
       path: config.cookies.path,
       domain: config.cookies.domain,

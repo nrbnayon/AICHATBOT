@@ -260,14 +260,14 @@ const getGoogleAuth = async (user: IUser) => {
   });
 
   oauth2Client.setCredentials({
-    access_token: decryptedAccessToken || undefined,
-    refresh_token: decryptedRefreshToken || undefined,
+    access_token: accessToken || undefined,
+    refresh_token: refreshToken || undefined,
   });
 
-  if (!decryptedRefreshToken) {
+  if (!refreshToken) {
     console.warn('No refresh token available for user:', user.email);
     try {
-      await oauth2Client.getTokenInfo(decryptedAccessToken!);
+      await oauth2Client.getTokenInfo(accessToken!);
       console.log('Access token is still valid, proceeding without refresh.');
       return oauth2Client;
     } catch (error) {

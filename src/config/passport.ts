@@ -135,8 +135,8 @@ passport.use(
 
         if (user) {
           user.googleId = profile.id;
-          user.googleAccessToken = encryptedAccessToken;
-          user.refreshToken = encryptedRefreshToken;
+          user.googleAccessToken = accessToken; 
+          user.refreshToken = refreshToken;
           user.authProvider = AUTH_PROVIDER.GOOGLE;
           user.name = profile.displayName;
           user.image = profile.photos?.[0]?.value;
