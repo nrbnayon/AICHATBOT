@@ -25,8 +25,10 @@ const corsOptions = {
     const allowedOrigins = [
       config.frontend.url,
       'http://localhost:5173',
+      'http://172.168.0.206:3000',
+      'http://192.168.10.206:5173',
       'http://172.16.0.2:3000',
-      'http://192.168.10.33:5173',
+      'http://172.16.0.2:5173',
     ];
 
     if (!origin || allowedOrigins.includes(origin)) {
