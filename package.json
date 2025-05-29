@@ -42,7 +42,6 @@
   },
   "dependencies": {
     "@types/express-rate-limit": "^6.0.2",
-    "@vercel/node": "^3.0.0",
     "apple-auth": "^1.0.9",
     "axios": "^1.8.2",
     "bcrypt": "^5.1.1",
